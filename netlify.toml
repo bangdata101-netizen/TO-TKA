@@ -1,0 +1,10 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Aturan redirect ini PENTING untuk aplikasi React/SPA
+# Agar saat user refresh di halaman /dashboard tidak 404
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

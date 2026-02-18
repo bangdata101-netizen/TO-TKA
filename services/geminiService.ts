@@ -1,18 +1,17 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Question } from "../types";
 
-// NOTE: In a production app, never expose API keys on the client.
-// This should be proxied through a backend.
-const API_KEY = process.env.API_KEY || ''; 
-
 export const generateQuestionsWithGemini = async (topic: string, count: number, grade: number): Promise<Question[]> => {
-  if (!API_KEY) {
-    console.warn("No API Key provided for Gemini");
+  // @google/genai guideline: The API key must be obtained exclusively from the environment variable process.env.API_KEY.
+  const apiKey = process.env.API_KEY;
+
+  if (!apiKey) {
+    console.warn("No API Key provided for Gemini. Please set API_KEY in environment variables.");
     return [];
   }
 
   try {
-    const ai = new GoogleGenAI({ apiKey: API_KEY });
+    const ai = new GoogleGenAI({ apiKey });
     
     const prompt = `Buatkan ${count} soal pilihan ganda untuk anak SD kelas ${grade} tentang topik "${topic}". 
     Format JSON harus berisi array soal. Setiap soal memiliki text, array options (4 pilihan), dan correctIndex (0-3).`;
