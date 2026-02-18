@@ -126,9 +126,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
   // MONITORING BULK ACTIONS
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
 
-  // MOBILE SIDEBAR STATE
-  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-
   useEffect(() => {
     loadData();
   }, []);
@@ -1144,7 +1141,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
                </div>
           )}
           
-          {/* ... Rest of existing tabs ... */}
           {/* BANK SOAL */}
           {activeTab === 'BANK_SOAL' && (
               <div className="space-y-6 animate-in fade-in print:hidden">
@@ -1257,4 +1253,396 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
                    </div>
                    <div className="mb-4 flex gap-4 bg-gray-50 p-4 rounded-lg border">
                        <div className="flex-1 relative">
-                            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-4
+                            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                            <input 
+                                type="text" 
+                                placeholder="Cari Siswa (Nama / NISN)..." 
+                                className="pl-9 pr-4 py-2 border rounded text-sm w-full outline-none focus:ring-2 focus:ring-blue-500"
+                                value={monitoringSearch} // Reusing monitoring search for simplicity
+                                onChange={(e) => setMonitoringSearch(e.target.value)}
+                            />
+                       </div>
+                       <select 
+                            className="border rounded p-2 text-sm min-w-[200px]"
+                            value={selectedSchoolFilter}
+                            onChange={(e) => setSelectedSchoolFilter(e.target.value)}
+                       >
+                           <option value="ALL">Semua Sekolah</option>
+                           {schools.map(s => <option key={s} value={s}>{s}</option>)}
+                       </select>
+                   </div>
+
+                   <div className="overflow-x-auto border rounded">
+                       <table className="w-full text-sm text-left">
+                           <thead className="bg-gray-50 font-bold border-b">
+                               <tr>
+                                   <th className="p-3">Nama Lengkap</th>
+                                   <th className="p-3">NISN / Username</th>
+                                   <th className="p-3">Sekolah</th>
+                                   <th className="p-3">Password</th>
+                                   <th className="p-3">Status</th>
+                                   <th className="p-3 text-center">Aksi</th>
+                               </tr>
+                           </thead>
+                           <tbody className="divide-y">
+                               {getMonitoringUsers(selectedSchoolFilter).map(u => (
+                                   <tr key={u.id} className="hover:bg-gray-50">
+                                       <td className="p-3 font-medium">{u.name}</td>
+                                       <td className="p-3 font-mono">{u.nisn}</td>
+                                       <td className="p-3">{u.school}</td>
+                                       <td className="p-3 font-mono text-gray-500">{u.password}</td>
+                                       <td className="p-3">
+                                            {u.status === 'blocked' ? (
+                                                <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded text-xs font-bold">Blocked</span>
+                                            ) : (
+                                                <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded text-xs font-bold">Active</span>
+                                            )}
+                                       </td>
+                                       <td className="p-3 text-center flex justify-center gap-2">
+                                           <button onClick={() => db.resetUserPassword(u.id).then(loadData)} className="p-1.5 bg-yellow-50 text-yellow-600 rounded border border-yellow-200 hover:bg-yellow-100" title="Reset Password Default"><Key size={14}/></button>
+                                           <button onClick={() => db.deleteUser(u.id).then(loadData)} className="p-1.5 bg-red-50 text-red-600 rounded border border-red-200 hover:bg-red-100" title="Hapus Siswa"><Trash2 size={14}/></button>
+                                       </td>
+                                   </tr>
+                               ))}
+                           </tbody>
+                       </table>
+                   </div>
+               </div>
+          )}
+
+          {/* HASIL UJIAN */}
+          {activeTab === 'HASIL_UJIAN' && (
+              <div className="bg-white rounded-xl shadow-sm border p-6 animate-in fade-in print:hidden">
+                  <div className="flex justify-between items-center mb-6">
+                      <h3 className="font-bold text-lg">Hasil Ujian Siswa</h3>
+                      <button onClick={handleExportResultsExcel} className="bg-green-600 text-white px-3 py-2 rounded text-sm font-bold flex items-center hover:bg-green-700"><FileSpreadsheet size={16} className="mr-2"/> Export Excel</button>
+                  </div>
+                  
+                  <div className="mb-4 flex gap-4">
+                       <select 
+                            className="border rounded p-2 text-sm"
+                            value={resultSchoolFilter}
+                            onChange={(e) => setResultSchoolFilter(e.target.value)}
+                       >
+                           <option value="ALL">Semua Sekolah</option>
+                           {schools.map(s => <option key={s} value={s}>{s}</option>)}
+                       </select>
+                  </div>
+
+                  <div className="overflow-x-auto border rounded">
+                      <table className="w-full text-sm text-left">
+                          <thead className="bg-gray-50 font-bold border-b">
+                              <tr>
+                                  <th className="p-3">Nama Siswa</th>
+                                  <th className="p-3">Sekolah</th>
+                                  <th className="p-3">Mata Pelajaran</th>
+                                  <th className="p-3">Nilai</th>
+                                  <th className="p-3">Waktu Submit</th>
+                                  <th className="p-3 text-center">Pelanggaran</th>
+                              </tr>
+                          </thead>
+                          <tbody className="divide-y">
+                              {results
+                                .filter(r => resultSchoolFilter === 'ALL' || users.find(u => u.id === r.studentId)?.school === resultSchoolFilter)
+                                .map(r => (
+                                  <tr key={r.id} className="hover:bg-gray-50">
+                                      <td className="p-3 font-medium">{r.studentName}</td>
+                                      <td className="p-3 text-gray-500">{users.find(u => u.id === r.studentId)?.school || '-'}</td>
+                                      <td className="p-3">{r.examTitle}</td>
+                                      <td className="p-3 font-bold text-blue-600">{r.score}</td>
+                                      <td className="p-3 text-gray-500">{new Date(r.submittedAt).toLocaleString()}</td>
+                                      <td className="p-3 text-center">
+                                          {r.cheatingAttempts > 0 ? (
+                                              <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded text-xs font-bold">{r.cheatingAttempts}x</span>
+                                          ) : (
+                                              <span className="text-gray-400">-</span>
+                                          )}
+                                      </td>
+                                  </tr>
+                              ))}
+                              {results.length === 0 && <tr><td colSpan={6} className="p-4 text-center text-gray-500">Belum ada hasil ujian.</td></tr>}
+                          </tbody>
+                      </table>
+                  </div>
+              </div>
+          )}
+
+          {/* CETAK KARTU */}
+          {activeTab === 'CETAK_KARTU' && (
+               <div className="space-y-6 animate-in fade-in">
+                   <div className="bg-white rounded-xl shadow-sm border p-6 print:hidden">
+                       <h3 className="font-bold text-lg mb-4 flex items-center"><Printer size={20} className="mr-2 text-blue-600"/> Cetak Kartu Peserta</h3>
+                       <div className="flex flex-wrap gap-4 items-end">
+                           <div>
+                               <label className="block text-xs font-bold text-gray-500 mb-1">Pilih Sekolah</label>
+                               <select 
+                                    className="border rounded p-2 text-sm min-w-[200px]"
+                                    value={cardSchoolFilter}
+                                    onChange={(e) => setCardSchoolFilter(e.target.value)}
+                               >
+                                   <option value="ALL">Semua Sekolah</option>
+                                   {schools.map(s => <option key={s} value={s}>{s}</option>)}
+                               </select>
+                           </div>
+                           <button onClick={() => window.print()} className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-bold flex items-center hover:bg-blue-700"><Printer size={16} className="mr-2"/> Print Sekarang</button>
+                       </div>
+                   </div>
+
+                   {/* PRINT PREVIEW AREA */}
+                   <div id="printable-area" className="bg-gray-50 p-4 border rounded-xl print:p-0 print:border-0 print:bg-white">
+                       <div className="print-grid grid grid-cols-1 md:grid-cols-2 gap-4">
+                           {users
+                             .filter(u => u.role === UserRole.STUDENT && (cardSchoolFilter === 'ALL' || u.school === cardSchoolFilter))
+                             .map(u => (
+                               <div key={u.id} className="card-container bg-white border border-gray-300 relative print:border-gray-800">
+                                   {/* Header Kartu */}
+                                   <div className="h-20 flex items-center px-4 border-b-2 border-double border-gray-300 print:border-gray-800" style={{ backgroundColor: themeColor + '10' }}>
+                                       <img src={FIXED_LOGO_URL} className="h-12 w-12 object-contain mr-3" alt="Logo"/>
+                                       <div className="flex-1">
+                                           <h4 className="font-bold text-sm text-center uppercase leading-tight text-black">{appName}</h4>
+                                           <p className="text-[10px] text-center text-gray-600 uppercase">Kartu Peserta Ujian Sekolah Dasar</p>
+                                           <p className="text-[10px] text-center font-bold mt-1 text-black">{u.school}</p>
+                                       </div>
+                                   </div>
+                                   
+                                   {/* Body Kartu */}
+                                   <div className="p-4 text-sm relative">
+                                       <div className="grid grid-cols-3 gap-1 mb-1">
+                                           <span className="text-gray-600 font-bold">Nama</span>
+                                           <span className="col-span-2 font-bold uppercase text-black">: {u.name}</span>
+                                       </div>
+                                       <div className="grid grid-cols-3 gap-1 mb-1">
+                                           <span className="text-gray-600 font-bold">NISN/User</span>
+                                           <span className="col-span-2 font-mono font-bold text-black">: {u.username}</span>
+                                       </div>
+                                       <div className="grid grid-cols-3 gap-1 mb-1">
+                                           <span className="text-gray-600 font-bold">Password</span>
+                                           <span className="col-span-2 font-mono font-bold text-black">: {u.password}</span>
+                                       </div>
+                                       <div className="grid grid-cols-3 gap-1">
+                                           <span className="text-gray-600 font-bold">Ruang</span>
+                                           <span className="col-span-2 font-bold text-black">: 01</span>
+                                       </div>
+                                       
+                                       <div className="mt-4 pt-2 border-t border-dashed border-gray-300 flex justify-between items-end">
+                                            <div className="text-[10px] text-gray-500">
+                                                <p>Dicetak: {printDate}</p>
+                                                <p>Kepala Sekolah</p>
+                                                <br/>
+                                                <p className="underline font-bold">.........................</p>
+                                            </div>
+                                            <div className="text-right">
+                                                <p className="text-xs font-bold text-blue-600">SCAN ME</p>
+                                                {/* Placeholder QR */}
+                                                <div className="w-12 h-12 bg-gray-200 ml-auto mt-1"></div>
+                                            </div>
+                                       </div>
+                                   </div>
+                               </div>
+                           ))}
+                       </div>
+                   </div>
+               </div>
+          )}
+
+          {/* ANTI CHEAT */}
+          {activeTab === 'ANTI_CHEAT' && (
+              <div className="bg-white rounded-xl shadow-sm border p-6 animate-in fade-in max-w-2xl print:hidden">
+                  <h3 className="font-bold text-lg mb-6 flex items-center"><ShieldAlert size={20} className="mr-2 text-red-600"/> Konfigurasi Anti-Curang</h3>
+                  
+                  <div className="space-y-6">
+                      <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border">
+                          <div>
+                              <h4 className="font-bold text-gray-800">Status Sistem</h4>
+                              <p className="text-sm text-gray-500">Deteksi pindah tab/window blur</p>
+                          </div>
+                          <button 
+                              onClick={() => setAcActive(!acActive)}
+                              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${acActive ? 'bg-green-500' : 'bg-gray-300'}`}
+                          >
+                              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${acActive ? 'translate-x-6' : 'translate-x-1'}`} />
+                          </button>
+                      </div>
+
+                      <div className={!acActive ? 'opacity-50 pointer-events-none' : ''}>
+                           <div className="mb-4">
+                               <label className="block text-sm font-bold text-gray-700 mb-2">Durasi Freeze (Detik)</label>
+                               <input type="number" className="border rounded p-2 w-full" value={acFreeze} onChange={e => setAcFreeze(Number(e.target.value))} />
+                               <p className="text-xs text-gray-500 mt-1">Waktu kunci layar saat terdeteksi curang.</p>
+                           </div>
+                           
+                           <div className="mb-4">
+                               <label className="block text-sm font-bold text-gray-700 mb-2">Pesan Peringatan</label>
+                               <input type="text" className="border rounded p-2 w-full" value={acText} onChange={e => setAcText(e.target.value)} />
+                           </div>
+
+                           <div className="mb-4">
+                               <label className="flex items-center space-x-2 cursor-pointer">
+                                   <input type="checkbox" checked={acSound} onChange={e => setAcSound(e.target.checked)} className="rounded text-blue-600"/>
+                                   <span className="text-sm font-bold text-gray-700">Aktifkan Suara Alarm</span>
+                               </label>
+                           </div>
+                      </div>
+
+                      <button onClick={handleSaveAntiCheat} className="bg-blue-600 text-white px-6 py-2 rounded font-bold hover:bg-blue-700 transition">Simpan Konfigurasi</button>
+                  </div>
+              </div>
+          )}
+
+      </main>
+
+      {/* MAPPING MODAL */}
+      {isEditModalOpen && editingExam && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+              <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+                  <div className="p-6 border-b flex justify-between items-center bg-gray-50">
+                      <div>
+                          <h3 className="font-bold text-xl text-gray-800">Mapping Jadwal & Akses Sekolah</h3>
+                          <p className="text-sm text-gray-500">{editingExam.title} - {editingExam.questions.length} Soal</p>
+                      </div>
+                      <button onClick={() => setIsEditModalOpen(false)} className="p-2 hover:bg-gray-200 rounded-full"><X/></button>
+                  </div>
+                  
+                  <div className="p-6 overflow-y-auto flex-1">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                          <div>
+                              <label className="block text-sm font-bold text-gray-700 mb-1">Tanggal Ujian</label>
+                              <input type="date" className="w-full border rounded p-2 text-sm" value={editDate} onChange={e => setEditDate(e.target.value)} />
+                          </div>
+                          <div>
+                              <label className="block text-sm font-bold text-gray-700 mb-1">Sesi Ujian</label>
+                              <select className="w-full border rounded p-2 text-sm" value={editSession} onChange={e => setEditSession(e.target.value)}>
+                                  <option>Sesi 1</option>
+                                  <option>Sesi 2</option>
+                                  <option>Sesi 3</option>
+                              </select>
+                          </div>
+                          <div>
+                              <label className="block text-sm font-bold text-gray-700 mb-1">Durasi (Menit)</label>
+                              <input type="number" className="w-full border rounded p-2 text-sm" value={editDuration} onChange={e => setEditDuration(Number(e.target.value))} />
+                          </div>
+                          <div>
+                              <label className="block text-sm font-bold text-gray-700 mb-1">Token Ujian</label>
+                              <input type="text" className="w-full border rounded p-2 text-sm font-mono uppercase font-bold tracking-widest bg-yellow-50" value={editToken} onChange={e => setEditToken(e.target.value.toUpperCase())} maxLength={6} />
+                          </div>
+                      </div>
+
+                      <div className="border-t pt-6">
+                           <div className="flex justify-between items-center mb-4">
+                               <h4 className="font-bold text-gray-800 flex items-center"><School size={18} className="mr-2"/> Akses Sekolah</h4>
+                               <div className="text-xs space-x-2">
+                                   <span className="text-green-600 font-bold bg-green-50 px-2 py-1 rounded">Terpilih: {editSchoolAccess.length}</span>
+                                   <span className="text-blue-600 font-bold bg-blue-50 px-2 py-1 rounded">Tersedia: {availableSchools.length}</span>
+                                   {busyCount > 0 && <span className="text-red-500 font-bold bg-red-50 px-2 py-1 rounded">Bentrok: {busyCount}</span>}
+                               </div>
+                           </div>
+
+                           <div className="flex gap-4 mb-4">
+                               <div className="relative flex-1">
+                                    <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"/>
+                                    <input type="text" placeholder="Cari sekolah..." className="w-full pl-9 pr-4 py-2 border rounded text-sm" value={mappingSearch} onChange={e => setMappingSearch(e.target.value)} />
+                               </div>
+                               <button onClick={() => addAllAvailableSchools(availableSchools)} className="bg-blue-100 text-blue-700 px-3 py-2 rounded text-xs font-bold whitespace-nowrap hover:bg-blue-200">Pilih Semua Tersedia</button>
+                           </div>
+                           
+                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                               {/* SELECTED */}
+                               <div className="border rounded-lg overflow-hidden">
+                                   <div className="bg-green-50 p-2 text-xs font-bold text-green-700 border-b flex justify-between">
+                                       <span>SEKOLAH TERPILIH (AKSES DIBUKA)</span>
+                                       <button onClick={() => setEditSchoolAccess([])} className="text-red-500 hover:underline">Hapus Semua</button>
+                                   </div>
+                                   <div className="h-48 overflow-y-auto p-2 space-y-1">
+                                       {assignedSchools.map(s => (
+                                           <div key={s} onClick={() => toggleSchoolAccess(s)} className="flex items-center justify-between p-2 rounded bg-green-100 border border-green-200 cursor-pointer hover:bg-red-50 hover:border-red-200 group transition">
+                                               <span className="text-xs font-bold text-gray-700">{s}</span>
+                                               <X size={14} className="text-green-600 group-hover:text-red-500"/>
+                                           </div>
+                                       ))}
+                                       {assignedSchools.length === 0 && <p className="text-center text-xs text-gray-400 py-10">Belum ada sekolah dipilih</p>}
+                                   </div>
+                               </div>
+
+                               {/* AVAILABLE */}
+                               <div className="border rounded-lg overflow-hidden">
+                                    <div className="bg-gray-50 p-2 text-xs font-bold text-gray-600 border-b">SEKOLAH TERSEDIA</div>
+                                    <div className="h-48 overflow-y-auto p-2 space-y-1">
+                                        {availableSchools.map(s => (
+                                            <div key={s} onClick={() => toggleSchoolAccess(s)} className="flex items-center justify-between p-2 rounded border border-gray-100 cursor-pointer hover:bg-blue-50 hover:border-blue-200 group transition">
+                                                 <span className="text-xs text-gray-600">{s}</span>
+                                                 <Plus size={14} className="text-gray-300 group-hover:text-blue-500"/>
+                                            </div>
+                                        ))}
+                                        {availableSchools.length === 0 && <p className="text-center text-xs text-gray-400 py-10">Tidak ada sekolah tersedia dengan filter ini</p>}
+                                    </div>
+                               </div>
+                           </div>
+                      </div>
+                  </div>
+                  
+                  <div className="p-4 border-t bg-gray-50 flex justify-end space-x-3">
+                      <button onClick={() => setIsEditModalOpen(false)} className="px-4 py-2 rounded text-sm font-bold text-gray-600 hover:bg-gray-200">Batal</button>
+                      <button onClick={handleSaveMapping} className="px-6 py-2 rounded bg-blue-600 text-white text-sm font-bold hover:bg-blue-700 shadow-md">Simpan Mapping</button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* MANUAL QUESTION MODAL */}
+      {isAddQuestionModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in">
+              <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+                   <div className="p-4 border-b flex justify-between items-center bg-gray-50">
+                       <h3 className="font-bold text-lg">Input Soal Manual</h3>
+                       <button onClick={() => setIsAddQuestionModalOpen(false)}><X/></button>
+                   </div>
+                   <div className="p-6 overflow-y-auto space-y-4">
+                       <div>
+                           <label className="block text-sm font-bold text-gray-700 mb-1">Tipe Soal</label>
+                           <select className="w-full border rounded p-2" value={nqType} onChange={e => setNqType(e.target.value as any)}>
+                               <option value="PG">Pilihan Ganda</option>
+                               <option value="PG_KOMPLEKS">Pilihan Ganda Kompleks</option>
+                           </select>
+                       </div>
+                       <div>
+                           <label className="block text-sm font-bold text-gray-700 mb-1">Narasi Soal</label>
+                           <textarea className="w-full border rounded p-2 h-24" placeholder="Ketik pertanyaan..." value={nqText} onChange={e => setNqText(e.target.value)}></textarea>
+                       </div>
+                       <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">URL Gambar (Opsional)</label>
+                            <input className="w-full border rounded p-2" placeholder="https://..." value={nqImg} onChange={e => setNqImg(e.target.value)} />
+                       </div>
+                       
+                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                           {nqOptions.map((opt, idx) => (
+                               <div key={idx}>
+                                   <label className="block text-xs font-bold text-gray-500 mb-1">Opsi {String.fromCharCode(65+idx)}</label>
+                                   <input className="w-full border rounded p-2 text-sm" value={opt} onChange={e => {
+                                       const newOpts = [...nqOptions];
+                                       newOpts[idx] = e.target.value;
+                                       setNqOptions(newOpts);
+                                   }} />
+                               </div>
+                           ))}
+                       </div>
+
+                       <div>
+                           <label className="block text-sm font-bold text-gray-700 mb-1">Kunci Jawaban (Index 0-3)</label>
+                           <select className="w-full border rounded p-2" value={nqCorrectIndex} onChange={e => setNqCorrectIndex(Number(e.target.value))}>
+                               {nqOptions.map((_, idx) => (
+                                   <option key={idx} value={idx}>Opsi {String.fromCharCode(65+idx)}</option>
+                               ))}
+                           </select>
+                       </div>
+                   </div>
+                   <div className="p-4 border-t flex justify-end gap-3 bg-gray-50">
+                       <button onClick={() => setIsAddQuestionModalOpen(false)} className="px-4 py-2 border rounded text-sm font-bold hover:bg-gray-100">Batal</button>
+                       <button onClick={handleSaveQuestion} className="px-6 py-2 bg-blue-600 text-white rounded text-sm font-bold hover:bg-blue-700">Simpan Soal</button>
+                   </div>
+              </div>
+          </div>
+      )}
+
+    </div>
+  );
+};
