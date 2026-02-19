@@ -27,13 +27,15 @@ function shuffleArray<T>(array: T[]): T[] {
 // Helper to shuffle options inside a question and update the correctIndex map
 const processQuestionsWithShuffledOptions = (questions: Question[]): Question[] => {
     return questions.map(q => {
+        // Only shuffle options if it's standard PG. 
+        // For PG_KOMPLEKS and BENAR_SALAH, order usually matters or shuffling complicates things too much for this scope.
+        if (q.type !== 'PG') return q;
+
         // 1. Map options to objects to track correctness
         const mappedOptions = q.options.map((opt, idx) => {
             let isCorrect = false;
             if (q.type === 'PG') {
                 isCorrect = idx === q.correctIndex;
-            } else if (['CHECKLIST', 'PG_KOMPLEKS'].includes(q.type)) {
-                isCorrect = q.correctIndices?.includes(idx) ?? false;
             }
             return { text: opt, isCorrect };
         });
@@ -46,21 +48,14 @@ const processQuestionsWithShuffledOptions = (questions: Question[]): Question[] 
 
         // 4. Find new indices for correct answers
         let newCorrectIndex = 0;
-        let newCorrectIndices: number[] = [];
-
         if (q.type === 'PG') {
             newCorrectIndex = shuffledMapped.findIndex(m => m.isCorrect);
-        } else if (['CHECKLIST', 'PG_KOMPLEKS'].includes(q.type)) {
-            newCorrectIndices = shuffledMapped
-                .map((m, idx) => m.isCorrect ? idx : -1)
-                .filter(idx => idx !== -1);
         }
 
         return {
             ...q,
             options: newOptions,
-            correctIndex: newCorrectIndex,
-            correctIndices: newCorrectIndices
+            correctIndex: newCorrectIndex
         };
     });
 };
@@ -245,6 +240,18 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({ user, exam, onComp
     setAnswers(newAnswers);
   };
 
+  const handleBenarSalah = (optionIndex: number, choice: 'B' | 'S') => {
+      const newAnswers = [...answers];
+      // Init array if null
+      if (!newAnswers[currentQuestionIndex]) {
+          newAnswers[currentQuestionIndex] = new Array(4).fill(null); 
+      }
+      const currentArr = [...newAnswers[currentQuestionIndex]];
+      currentArr[optionIndex] = choice;
+      newAnswers[currentQuestionIndex] = currentArr;
+      setAnswers(newAnswers);
+  };
+
   const handleEssay = (text: string) => {
       const newAnswers = [...answers];
       newAnswers[currentQuestionIndex] = text;
@@ -266,15 +273,21 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({ user, exam, onComp
 
           if (q.type === 'PG' && answer === q.correctIndex) {
               score += q.points;
-          } else if ((q.type === 'PG_KOMPLEKS' || q.type === 'CHECKLIST') && q.correctIndices) {
-              // Basic logic: if selected array matches correctIndices array (sorted)
+          } 
+          else if ((q.type === 'PG_KOMPLEKS' || q.type === 'CHECKLIST') && q.correctIndices) {
               const selected = (answer as number[]).sort();
               const correct = [...q.correctIndices].sort();
               if (JSON.stringify(selected) === JSON.stringify(correct)) {
                   score += q.points;
               }
           }
-          // Essay score is 0 by default until graded
+          else if (q.type === 'BENAR_SALAH' && q.correctSequence) {
+              // Exact match of array ['B', 'S', 'B', 'B']
+              const selected = answer as string[]; // e.g. ['B', 'S', 'B', 'B']
+              if (JSON.stringify(selected) === JSON.stringify(q.correctSequence)) {
+                  score += q.points;
+              }
+          }
       });
       return score;
   };
@@ -323,7 +336,6 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({ user, exam, onComp
   const renderAnswerInput = (q: Question) => {
       if (q.type === 'PG') {
           return (
-            // Modified: Grid layout 1 column on mobile, 2 columns on md+ screens
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {q.options?.map((opt, idx) => (
                     <label key={idx} className="cursor-pointer group flex items-start h-full">
@@ -344,10 +356,11 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({ user, exam, onComp
                 ))}
             </div>
           );
-      } else if (q.type === 'PG_KOMPLEKS' || q.type === 'CHECKLIST') {
+      } 
+      else if (q.type === 'PG_KOMPLEKS' || q.type === 'CHECKLIST') {
           return (
             <div className="grid grid-cols-1 gap-3">
-                <p className="text-sm italic mb-2" style={{ color: themeColor }}>* Pilih jawaban lebih dari satu</p>
+                <p className="text-sm italic mb-2" style={{ color: themeColor }}>* Pilih jawaban lebih dari satu (Kotak Centang)</p>
                 {q.options?.map((opt, idx) => (
                     <label key={idx} className="cursor-pointer group flex items-start">
                         <input 
@@ -366,7 +379,52 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({ user, exam, onComp
                 ))}
             </div>
           );
-      } else if (q.type === 'URAIAN') {
+      }
+      else if (q.type === 'BENAR_SALAH') {
+          return (
+              <div className="space-y-4">
+                  <p className="text-sm italic mb-2" style={{ color: themeColor }}>* Tentukan Benar atau Salah untuk setiap pernyataan</p>
+                  <div className="border rounded-lg overflow-hidden">
+                      <div className="bg-gray-50 p-2 grid grid-cols-12 gap-2 text-sm font-bold text-gray-600 border-b">
+                          <div className="col-span-8">Pernyataan</div>
+                          <div className="col-span-2 text-center">Benar</div>
+                          <div className="col-span-2 text-center">Salah</div>
+                      </div>
+                      {q.options.filter(opt => opt && opt.trim() !== '').map((opt, idx) => {
+                          const currentAns = answers[currentQuestionIndex]?.[idx];
+                          return (
+                              <div key={idx} className="p-3 grid grid-cols-12 gap-2 items-center border-b last:border-0 hover:bg-gray-50">
+                                  <div className={`col-span-8 ${getFontSizeClass()}`}>{opt}</div>
+                                  <div className="col-span-2 flex justify-center">
+                                      <label className="cursor-pointer">
+                                          <input 
+                                            type="radio" 
+                                            name={`bs-${q.id}-${idx}`} 
+                                            checked={currentAns === 'B'} 
+                                            onChange={() => handleBenarSalah(idx, 'B')}
+                                            className="w-5 h-5 text-blue-600 focus:ring-blue-500"
+                                          />
+                                      </label>
+                                  </div>
+                                  <div className="col-span-2 flex justify-center">
+                                      <label className="cursor-pointer">
+                                          <input 
+                                            type="radio" 
+                                            name={`bs-${q.id}-${idx}`} 
+                                            checked={currentAns === 'S'}
+                                            onChange={() => handleBenarSalah(idx, 'S')}
+                                            className="w-5 h-5 text-red-600 focus:ring-red-500"
+                                          />
+                                      </label>
+                                  </div>
+                              </div>
+                          )
+                      })}
+                  </div>
+              </div>
+          )
+      }
+      else if (q.type === 'URAIAN') {
           return (
               <div className="mt-2">
                   <p className="text-sm italic mb-2" style={{ color: themeColor }}>* Jawablah uraian di bawah ini</p>
@@ -414,7 +472,7 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({ user, exam, onComp
               src={previewImage} 
               alt="Preview" 
               className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl animate-in zoom-in-95 duration-300"
-              onClick={(e) => e.stopPropagation()} // Optional: keep modal open if clicking image itself, but user said "click image to zoom out", usually implies clicking away or toggle. I'll let click close it for simplicity or add specific logic.
+              onClick={(e) => e.stopPropagation()} 
            />
            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-white/80 text-sm bg-black/50 px-4 py-2 rounded-full pointer-events-none">
               Klik dimana saja untuk menutup
@@ -436,7 +494,7 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({ user, exam, onComp
                   
                   <div className="grid grid-cols-5 gap-3">
                       {activeQuestions.map((q, idx) => {
-                          const isAnswered = answers[idx] !== null && answers[idx] !== undefined && (Array.isArray(answers[idx]) ? answers[idx].length > 0 : String(answers[idx]).trim() !== '');
+                          const isAnswered = answers[idx] !== null && answers[idx] !== undefined && (Array.isArray(answers[idx]) ? answers[idx].filter((x:any) => x !== null).length > 0 : String(answers[idx]).trim() !== '');
                           const isCurrent = currentQuestionIndex === idx;
                           const isDoubt = markedDoubts[idx];
                           
@@ -486,7 +544,7 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({ user, exam, onComp
           </div>
       )}
 
-      {/* TIME ALERT POPUP (WARNING 5 MIN / 1 MIN) */}
+      {/* TIME ALERT POPUP */}
       {timeAlert && (
           <div className="fixed inset-0 z-[80] flex items-center justify-center pointer-events-none px-4">
               <div className="bg-orange-500 text-white px-8 py-6 rounded-2xl shadow-2xl flex flex-col items-center animate-in zoom-in duration-300 border-4 border-white ring-4 ring-orange-200/50 max-w-sm w-full text-center">
@@ -500,17 +558,13 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({ user, exam, onComp
       {/* Score Popup Modal */}
       {showScoreModal && (
           <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-500">
-              
-              {/* Confetti Effect */}
               <Confetti />
-
               <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-8 text-center animate-in zoom-in-95 duration-300 border-4 border-white ring-8 ring-blue-500/20 relative z-50">
                   <div className="w-24 h-24 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner animate-bounce">
                       <Trophy className="w-12 h-12 text-yellow-600" />
                   </div>
                   <h2 className="text-3xl font-extrabold text-gray-800 mb-2">Ujian Selesai!</h2>
                   
-                  {/* Motivational Quote */}
                   <p className="text-gray-600 mb-6 italic text-sm">
                       "{getMotivation(finalScore, maxPossibleScore, user.name)}"
                   </p>
@@ -531,7 +585,7 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({ user, exam, onComp
           </div>
       )}
 
-      {/* Header PUSMENDIK Style - KEMDIKBUD LOGO */}
+      {/* Header */}
       <header className="text-white shadow-md z-10 sticky top-0" style={{ backgroundColor: themeColor }}>
         <div className="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
           <div className="flex items-center space-x-4">
@@ -544,7 +598,7 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({ user, exam, onComp
             </div>
             <div>
               <h1 className="font-bold text-lg leading-tight">{appName}</h1>
-              <p className="text-xs text-blue-100">Digital Assessment System (DAS)</p>
+              <p className="text-xs text-blue-100">Sistem Penilaian SPENDAPOL</p>
             </div>
           </div>
           <div className="flex items-center space-x-4">
@@ -598,8 +652,6 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({ user, exam, onComp
                         style={{ transformOrigin: 'var(--zoom-x) var(--zoom-y)' }}
                         onError={(e) => e.currentTarget.parentElement!.style.display = 'none'} 
                      />
-                     
-                     {/* Magnifier Hint Overlay */}
                      <div className="absolute bottom-2 right-2 bg-black/60 backdrop-blur-sm text-white text-[10px] px-2 py-1 rounded-full opacity-80 transition-opacity pointer-events-none flex items-center group-hover:opacity-0">
                         <Maximize2 size={12} className="mr-1"/> Klik untuk Memperbesar
                      </div>

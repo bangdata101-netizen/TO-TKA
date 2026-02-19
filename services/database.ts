@@ -3,7 +3,7 @@ import { User, Exam, ExamResult, AppSettings, Question, UserRole } from '../type
 
 // Hardcoded Settings (Since app_settings table is removed in new schema)
 const DEFAULT_SETTINGS: AppSettings = {
-  appName: 'UJI TKA MANDIRI',
+  appName: 'ASESMEN SMPN 2 GEMPOL',
   themeColor: '#2459a9',
   gradientEndColor: '#60a5fa',
   logoStyle: 'circle',
@@ -70,12 +70,12 @@ export const db = {
         name: data.name,
         username: data.nisn,
         role: data.role as UserRole,
-        school: data.school,
+        school: data.school, // This effectively holds Class Name now
         nisn: data.nisn,
         password: data.password,
         status: data.status,
         isLogin: data.is_login,
-        grade: data.grade || 6
+        grade: data.grade || 7
     };
   },
 
@@ -105,20 +105,46 @@ export const db = {
         const { data: questions } = await supabase
             .from('questions')
             .select('*')
-            .eq('subject_id', sub.id);
+            .eq('subject_id', sub.id)
+            .order('created_at', { ascending: true }); // Ensure order
         
         const mappedQuestions: Question[] = (questions || []).map((q: any) => {
-            let cIndex = 0;
-            const keyChar = q.Kunci ? q.Kunci.trim().toUpperCase() : 'A';
-            if (keyChar === 'B') cIndex = 1;
-            if (keyChar === 'C') cIndex = 2;
-            if (keyChar === 'D') cIndex = 3;
+            const rawKey = q.Kunci ? q.Kunci.trim().toUpperCase() : '';
+            const qType = (q["Tipe Soal"] as any) || 'PG';
+            
+            let correctIndex = 0;
+            let correctIndices: number[] = [];
+            let correctSequence: string[] = [];
+
+            // PARSING LOGIC BERDASARKAN TIPE
+            if (qType === 'PG') {
+                if (rawKey === 'B') correctIndex = 1;
+                else if (rawKey === 'C') correctIndex = 2;
+                else if (rawKey === 'D') correctIndex = 3;
+                else correctIndex = 0; // Default A
+            } 
+            else if (qType === 'PG_KOMPLEKS' || qType === 'CHECKLIST') {
+                // Expect key like "A,C" or "A, B, D"
+                const keys = rawKey.split(',').map((k: string) => k.trim());
+                correctIndices = keys.map((k: string) => {
+                    if (k === 'B') return 1;
+                    if (k === 'C') return 2;
+                    if (k === 'D') return 3;
+                    return 0; // A
+                });
+                // Remove duplicates
+                correctIndices = [...new Set(correctIndices)].sort();
+            }
+            else if (qType === 'BENAR_SALAH') {
+                // Expect key like "B,S,B,B" (Benar, Salah, Benar, Benar) corresponding to Opt A, B, C, D
+                correctSequence = rawKey.split(',').map((k: string) => k.trim());
+            }
             
             return {
                 id: q.id,
                 subjectId: q.subject_id,
                 nomor: q.Nomor,
-                type: (q["Tipe Soal"] as any) || 'PG',
+                type: qType,
                 text: q.Soal || '',
                 imgUrl: q["Url Gambar"] || undefined,
                 options: [
@@ -127,12 +153,14 @@ export const db = {
                     q["Opsi C"] || '', 
                     q["Opsi D"] || ''
                 ],
-                correctIndex: cIndex,
+                correctIndex,
+                correctIndices,
+                correctSequence,
                 points: parseInt(q.Bobot || '10')
             };
         });
 
-        // Parse School Access JSONB
+        // Parse Class/School Access JSONB
         let schoolAccess: string[] = [];
         try {
             if (typeof sub.school_access === 'string') {
@@ -146,7 +174,7 @@ export const db = {
             id: sub.id,
             title: sub.name,
             subject: sub.name,
-            educationLevel: 'SD',
+            educationLevel: 'SMP',
             durationMinutes: sub.duration,
             questionCount: sub.question_count,
             token: sub.token,
@@ -184,8 +212,25 @@ export const db = {
 
   addQuestions: async (examId: string, questions: Question[]): Promise<void> => {
       const payload = questions.map((q, idx) => {
-          const keyMap = ['A', 'B', 'C', 'D'];
-          const keyChar = q.correctIndex !== undefined ? keyMap[q.correctIndex] : 'A';
+          let keyString = 'A';
+
+          if (q.type === 'PG') {
+              const keyMap = ['A', 'B', 'C', 'D'];
+              keyString = q.correctIndex !== undefined ? keyMap[q.correctIndex] : 'A';
+          } 
+          else if (q.type === 'PG_KOMPLEKS') {
+              // Convert indices [0, 2] to "A,C"
+              const keyMap = ['A', 'B', 'C', 'D'];
+              if (q.correctIndices) {
+                  keyString = q.correctIndices.map(i => keyMap[i]).join(',');
+              }
+          }
+          else if (q.type === 'BENAR_SALAH') {
+              // Array ['B', 'S', 'B'] to "B,S,B"
+              if (q.correctSequence) {
+                  keyString = q.correctSequence.join(',');
+              }
+          }
 
           return {
               subject_id: examId,
@@ -197,7 +242,7 @@ export const db = {
               "Opsi B": q.options[1] || '',
               "Opsi C": q.options[2] || '',
               "Opsi D": q.options[3] || '',
-              "Kunci": keyChar,
+              "Kunci": keyString,
               "Bobot": String(q.points),
               "Url Gambar": q.imgUrl || ''
           };
@@ -263,11 +308,11 @@ export const db = {
         username: u.nisn,
         role: u.role as UserRole,
         nisn: u.nisn,
-        school: u.school,
+        school: u.school, // Maps to Class Name
         password: u.password,
         status: u.status,
         isLogin: u.is_login,
-        grade: u.grade || 6
+        grade: u.grade || 7
     }));
   },
   

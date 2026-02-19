@@ -24,7 +24,7 @@ const App: React.FC = () => {
   
   // App Settings State
   const [settings, setSettings] = useState<AppSettings>({
-    appName: 'UJI TKA MANDIRI',
+    appName: 'ASESMEN SMPN 2 GEMPOL',
     themeColor: '#2459a9',
     gradientEndColor: '#60a5fa',
     logoStyle: 'circle',
@@ -177,7 +177,7 @@ const App: React.FC = () => {
                       </div>
                       <div>
                           <h1 className="text-xl font-extrabold text-white tracking-wide drop-shadow-sm">{settings.appName}</h1>
-                          <p className="text-xs text-blue-100 opacity-90">Digital Assessment System (DAS) - Jenjang SD</p>
+                          <p className="text-xs text-blue-100 opacity-90">Sistem Penilaian SPENDAPOL</p>
                       </div>
                   </div>
               </div>
@@ -246,7 +246,7 @@ const App: React.FC = () => {
 
           <div className="fixed bottom-6 w-full text-center z-20 pointer-events-none">
               <span className="inline-block bg-white/80 backdrop-blur rounded-full px-4 py-1.5 text-xs font-semibold shadow-lg border border-white/50" style={{ color: settings.themeColor }}>
-                Digital Assessment System (DAS) @2026 | akhmadnasor
+                APlikasi Penilaian Terpadu (APT) @2026 - By:Mr.Wahyu
               </span>
           </div>
 

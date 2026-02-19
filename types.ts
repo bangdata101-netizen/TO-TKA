@@ -11,7 +11,7 @@ export interface User {
   name: string;
   username: string; // Maps to NISN
   role: UserRole;
-  school?: string;
+  school?: string; // In UI we refer to this as 'Class' (Kelas)
   password?: string;
   isLogin?: boolean;
   status?: 'idle' | 'working' | 'finished' | 'blocked';
@@ -23,7 +23,7 @@ export interface User {
   isLocked?: boolean;
 }
 
-export type QuestionType = 'PG' | 'PG_KOMPLEKS' | 'CHECKLIST' | 'URAIAN';
+export type QuestionType = 'PG' | 'PG_KOMPLEKS' | 'CHECKLIST' | 'URAIAN' | 'BENAR_SALAH';
 
 // Mapped from 'questions' table
 export interface Question {
@@ -35,8 +35,9 @@ export interface Question {
   text: string;      // Mapped from "Soal"
   imgUrl?: string;   // Mapped from "Url Gambar"
   options: string[]; // Mapped from "Opsi A"..."Opsi D"
-  correctIndex?: number; // Parsed from "Kunci"
-  correctIndices?: number[]; // Parsed from "Kunci" for Complex
+  correctIndex?: number; // For PG
+  correctIndices?: number[]; // For PG_KOMPLEKS / CHECKLIST
+  correctSequence?: string[]; // For BENAR_SALAH (e.g. ['B', 'S', 'B', 'S'])
   points: number;    // Mapped from "Bobot"
 }
 
@@ -54,7 +55,7 @@ export interface Exam {
   // Mapping Fields
   examDate?: string; // Mapped from "exam_date"
   session?: string;  // Mapped from "session"
-  schoolAccess?: string[]; // Mapped from "school_access"
+  schoolAccess?: string[]; // Mapped from "school_access" (Now represents Class Access)
 
   // Virtual fields for UI compatibility
   educationLevel: 'SD' | 'SMP';

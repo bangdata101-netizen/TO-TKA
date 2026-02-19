@@ -1,6 +1,6 @@
 {
-  "name": "TRY OUT TKA SPENDAPOL",
-  "description": "Aplikasi Ujian Tes Kompetensi Akademik untuk SD dengan fitur anti-curang dan manajemen bertingkat.",
+  "name": "ASESMEN SMPN 2 GEMPOL",
+  "description": "Aplikasi Penilaian Terpadu (APT) untuk SMP dengan fitur anti-curang dan manajemen bertingkat.",
   "requestFramePermissions": [
     "microphone"
   ]

@@ -1,9 +1,8 @@
-
 import { User, UserRole, Exam, ExamResult, AppSettings } from '../types';
 
 // Initial Mock Data
 let MOCK_SETTINGS: AppSettings = {
-  appName: 'UJI TKA MANDIRI',
+  appName: 'ASESMEN SMPN 2 GEMPOL',
   schoolLogoUrl: 'https://lh3.googleusercontent.com/d/1om6FjHkWU1GiERCp0zV73widePqQruKF', // Default Logo (App Logo) for Card Printing
   themeColor: '#2459a9', // Default Pusmendik Blue
   gradientEndColor: '#60a5fa', // Blue-400
