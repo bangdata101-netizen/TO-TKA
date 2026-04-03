@@ -151,7 +151,8 @@ export const db = {
                     q["Opsi A"] || '', 
                     q["Opsi B"] || '', 
                     q["Opsi C"] || '', 
-                    q["Opsi D"] || ''
+                    q["Opsi D"] || '',
+                    q["Opsi E"] || ''
                 ],
                 correctIndex,
                 correctIndices,
@@ -192,7 +193,7 @@ export const db = {
 
   // Updated to support Full Mapping
   updateExamMapping: async (examId: string, token: string, durationMinutes: number, examDate: string, startTime: string, endTime: string, schoolAccess: string[]): Promise<void> => {
-    await supabase.from('subjects').update({ 
+    const { error } = await supabase.from('subjects').update({ 
       token: token,
       duration: durationMinutes,
       exam_date: examDate,
@@ -200,6 +201,8 @@ export const db = {
       end_time: endTime,
       school_access: schoolAccess // Supabase handles array to JSONB auto conversion
     }).eq('id', examId);
+    
+    if (error) throw error;
   },
 
   toggleExamStatus: async (examId: string, isActive: boolean): Promise<void> => {
@@ -225,12 +228,12 @@ export const db = {
           let keyString = 'A';
 
           if (q.type === 'PG') {
-              const keyMap = ['A', 'B', 'C', 'D'];
+              const keyMap = ['A', 'B', 'C', 'D', 'E'];
               keyString = q.correctIndex !== undefined ? keyMap[q.correctIndex] : 'A';
           } 
           else if (q.type === 'PG_KOMPLEKS') {
               // Convert indices [0, 2] to "A,C"
-              const keyMap = ['A', 'B', 'C', 'D'];
+              const keyMap = ['A', 'B', 'C', 'D', 'E'];
               if (q.correctIndices) {
                   keyString = q.correctIndices.map(i => keyMap[i]).join(',');
               }
@@ -252,6 +255,7 @@ export const db = {
               "Opsi B": q.options[1] || '',
               "Opsi C": q.options[2] || '',
               "Opsi D": q.options[3] || '',
+              "Opsi E": q.options[4] || '',
               "Kunci": keyString,
               "Bobot": String(q.points),
               "Url Gambar": q.imgUrl || ''

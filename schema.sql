@@ -44,7 +44,8 @@ CREATE TABLE questions (
     "Opsi B" TEXT,
     "Opsi C" TEXT,
     "Opsi D" TEXT,
-    "Kunci" TEXT, -- A, B, C, D
+    "Opsi E" TEXT,
+    "Kunci" TEXT, -- A, B, C, D, E
     "Bobot" TEXT DEFAULT '10',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
 );

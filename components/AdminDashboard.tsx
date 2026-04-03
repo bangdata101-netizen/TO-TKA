@@ -10,20 +10,64 @@ import { Plus, BookOpen, Save, LogOut, Loader2, Key, RotateCcw, Clock, Upload, D
 // --- HELPERS ---
 const cleanWordHtml = (html: string) => {
     if (!html) return '';
-    // Replace common Word tags with standard HTML
-    let cleaned = html
-        .replace(/<strong[^>]*>/gi, '<b>').replace(/<\/strong>/gi, '</b>')
-        .replace(/<em[^>]*>/gi, '<i>').replace(/<\/em>/gi, '</i>')
-        .replace(/<u[^>]*>/gi, '<u>').replace(/<\/u>/gi, '</u>')
-        .replace(/<span[^>]*style="[^"]*font-weight:\s*bold[^"]*"[^>]*>(.*?)<\/span>/gi, '<b>$1</b>')
-        .replace(/<span[^>]*style="[^"]*font-style:\s*italic[^"]*"[^>]*>(.*?)<\/span>/gi, '<i>$1</i>')
-        .replace(/<span[^>]*style="[^"]*text-decoration:\s*underline[^"]*"[^>]*>(.*?)<\/span>/gi, '<u>$1</u>');
     
-    // Keep only allowed tags
-    cleaned = cleaned.replace(/<(?!\/?(b|i|u|br|img)\b)[^>]+>/gi, '');
-    
-    // Clean up non-breaking spaces and extra whitespace
-    return cleaned.replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+    // Create a temporary div to parse HTML and manipulate it safely
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = html;
+
+    // Helper to process nodes recursively
+    const processNode = (node: Node): string => {
+        if (node.nodeType === Node.TEXT_NODE) {
+            return node.textContent || '';
+        }
+        
+        if (node.nodeType === Node.ELEMENT_NODE) {
+            const el = node as HTMLElement;
+            const tag = el.tagName.toLowerCase();
+            
+            // Get children content
+            let childrenContent = '';
+            for (const child of Array.from(el.childNodes)) {
+                childrenContent += processNode(child);
+            }
+
+            // Map tags
+            if (['b', 'strong'].includes(tag)) return `<b>${childrenContent}</b>`;
+            if (['i', 'em'].includes(tag)) return `<i>${childrenContent}</i>`;
+            if (['u'].includes(tag)) return `<u>${childrenContent}</u>`;
+            if (['sub'].includes(tag)) return `<sub>${childrenContent}</sub>`;
+            if (['sup'].includes(tag)) return `<sup>${childrenContent}</sup>`;
+            if (tag === 'br') return '<br/>';
+            if (tag === 'p' || tag === 'div') return `<div>${childrenContent}</div>`;
+            if (tag === 'img') {
+                const src = el.getAttribute('src');
+                return src ? `<img src="${src}" />` : '';
+            }
+            if (['table', 'tr', 'td', 'th', 'tbody', 'thead'].includes(tag)) {
+                return `<${tag}>${childrenContent}</${tag}>`;
+            }
+            
+            // Handle spans with styles (Word's way of bold/italic/underline)
+            if (tag === 'span') {
+                const style = el.getAttribute('style') || '';
+                let wrapped = childrenContent;
+                if (style.match(/font-weight\s*:\s*(bold|700|800|900)/i)) wrapped = `<b>${wrapped}</b>`;
+                if (style.match(/font-style\s*:\s*italic/i)) wrapped = `<i>${wrapped}</i>`;
+                if (style.match(/text-decoration\s*:\s*underline/i)) wrapped = `<u>${wrapped}</u>`;
+                return wrapped;
+            }
+
+            return childrenContent;
+        }
+        return '';
+    };
+
+    let result = '';
+    for (const child of Array.from(tempDiv.childNodes)) {
+        result += processNode(child);
+    }
+
+    return result.replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
 };
 
 interface AdminDashboardProps {
@@ -259,19 +303,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
       if (!editingExam) return;
       if (editToken.length < 3) return alert("Token minimal 3 karakter");
       
-      await db.updateExamMapping(
-          editingExam.id, 
-          editToken.toUpperCase(), 
-          editDuration,
-          editDate,
-          editStartTime,
-          editEndTime,
-          editSchoolAccess
-      );
-      setIsEditModalOpen(false);
-      setEditingExam(null);
-      loadData();
-      alert("Mapping Jadwal & Akses Kelas berhasil diperbarui!");
+      try {
+          await db.updateExamMapping(
+              editingExam.id, 
+              editToken.toUpperCase(), 
+              editDuration,
+              editDate,
+              editStartTime,
+              editEndTime,
+              editSchoolAccess
+          );
+          setIsEditModalOpen(false);
+          setEditingExam(null);
+          await loadData();
+          alert("Mapping Jadwal & Akses Kelas berhasil diperbarui!");
+      } catch (error) {
+          console.error("Error saving mapping:", error);
+          alert("Gagal menyimpan mapping: " + (error instanceof Error ? error.message : String(error)));
+      }
   };
 
   // --- QUESTION BANK & IMPORT/EXPORT ---
@@ -325,7 +374,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
           const htmlFile = Object.keys(zip.files).find(name => name.endsWith('.htm') || name.endsWith('.html'));
           
           if (!htmlFile) {
-              alert("File HTML tidak ditemukan dalam ZIP.");
+              alert("File HTML tidak ditemukan dalam ZIP. Pastikan Anda menyimpan sebagai 'Web Page Filtered' dan men-zip file .htm beserta foldernya.");
               setIsProcessingImport(false);
               return;
           }
@@ -334,28 +383,33 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
           const parser = new DOMParser();
           const doc = parser.parseFromString(htmlContent, 'text/html');
           
-          // Helper to get public URL for images (upload to Supabase)
           const getPublicUrlForImage = async (src: string) => {
-              const htmlDir = htmlFile.includes('/') ? htmlFile.substring(0, htmlFile.lastIndexOf('/') + 1) : '';
-              const imgPath = decodeURIComponent(src.replace(/\\/g, '/'));
-              const fullPath = htmlDir + imgPath;
+              if (src.startsWith('data:')) return src;
               
-              let imgZipFile = zip.files[fullPath] || zip.files[imgPath];
+              const cleanSrc = decodeURIComponent(src.replace(/\\/g, '/'));
+              const fileName = cleanSrc.split('/').pop();
+              
+              // Try multiple path resolutions
+              let imgZipFile = zip.files[cleanSrc];
+              
               if (!imgZipFile) {
-                  const fileName = imgPath.split('/').pop();
+                  const htmlDir = htmlFile.includes('/') ? htmlFile.substring(0, htmlFile.lastIndexOf('/') + 1) : '';
+                  imgZipFile = zip.files[htmlDir + cleanSrc];
+              }
+              
+              if (!imgZipFile && fileName) {
                   const foundKey = Object.keys(zip.files).find(k => k.endsWith('/' + fileName) || k === fileName);
                   if (foundKey) imgZipFile = zip.files[foundKey];
               }
 
               if (imgZipFile) {
                   const blob = await imgZipFile.async('blob');
-                  const fileName = imgPath.split('/').pop() || 'image.png';
+                  const finalFileName = fileName || `img-${Date.now()}.png`;
                   
                   try {
-                      // Use a public bucket named 'exam-assets'
                       const { data, error } = await supabase.storage
                           .from('exam-assets')
-                          .upload(`questions/${Date.now()}-${fileName}`, blob);
+                          .upload(`questions/${Date.now()}-${finalFileName}`, blob);
                       
                       if (error) throw error;
                       
@@ -376,45 +430,62 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
               return null;
           };
 
-          const paragraphs = Array.from(doc.querySelectorAll('p, div'));
+          const processHtmlImages = async (html: string, container: Element) => {
+              let result = cleanWordHtml(html);
+              const imgs = container.querySelectorAll('img');
+              for (const img of Array.from(imgs)) {
+                  const src = img.getAttribute('src');
+                  if (src) {
+                      const url = await getPublicUrlForImage(src);
+                      if (url) {
+                          // Replace the original src with the new URL in the cleaned HTML
+                          // Note: cleanWordHtml might have changed the structure, so we do a simple string replace
+                          result = result.replace(src, url);
+                      }
+                  }
+              }
+              return result;
+          };
+
+          // Let's use a more reliable way to get top-level blocks
+          const topLevelBlocks = Array.from(doc.body.children);
           const newQuestions: Question[] = [];
           let currentQuestion: Partial<Question> | null = null;
+          let currentOptionIndex = -1; // -1: question text, 0-4: options
 
-          for (let i = 0; i < paragraphs.length; i++) {
-              const p = paragraphs[i];
-              const text = p.textContent?.trim() || '';
-              const html = p.innerHTML;
+          // If Word wraps everything in a single div
+          let blocksToProcess = topLevelBlocks;
+          if (topLevelBlocks.length === 1 && topLevelBlocks[0].tagName.toLowerCase() === 'div') {
+              blocksToProcess = Array.from(topLevelBlocks[0].children);
+          }
+
+          for (const el of blocksToProcess) {
+              const text = el.textContent?.trim() || '';
+              const html = el.innerHTML;
               
-              // 1. Detect Question Start (e.g. "1. ", "2. ")
-              const qMatch = text.match(/^(\d+)[\.\)]\s*(.*)/);
+              // Detect Question: "1. ", "1) ", "(1) "
+              const qMatch = text.match(/^\s*\(?(\d+)[\.\)]\s*(.*)/s);
+              // Detect Option: "A. ", "a. ", "A) ", "(A) "
+              const optMatch = text.match(/^\s*\(?([A-E])[\.\)]\s*(.*)/is);
+              // Detect Key: "#Kunci: A" or "#Kunci: A,B"
+              const keyMatch = text.match(/^\s*#Kunci:\s*(.*)/i);
+
               if (qMatch) {
-                  if (currentQuestion && currentQuestion.text && currentQuestion.options?.length === 4) {
+                  // Save previous
+                  if (currentQuestion && currentQuestion.text) {
                       newQuestions.push(currentQuestion as Question);
                   }
 
                   let qType: QuestionType = 'PG';
-                  let qText = qMatch[2].trim();
+                  let qTextRaw = qMatch[2].trim();
 
-                  if (qText.toLowerCase().includes('(pilihan ganda kompleks)')) {
+                  if (qTextRaw.toLowerCase().includes('(pilihan ganda kompleks)')) {
                       qType = 'PG_KOMPLEKS';
-                      qText = qText.replace(/\(pilihan ganda kompleks\)/gi, '').trim();
-                  } else if (qText.toLowerCase().includes('(benar/salah)')) {
+                  } else if (qTextRaw.toLowerCase().includes('(benar/salah)')) {
                       qType = 'BENAR_SALAH';
-                      qText = qText.replace(/\(benar\/salah\)/gi, '').trim();
                   }
 
-                  // Process images in this paragraph
-                  let processedHtml = cleanWordHtml(html.replace(/^(\d+)[\.\)]\s*/, ''));
-                  const imgs = p.querySelectorAll('img');
-                  for (const img of Array.from(imgs)) {
-                      const src = img.getAttribute('src');
-                      if (src) {
-                          const url = await getPublicUrlForImage(src);
-                          if (url) {
-                              processedHtml = processedHtml.replace(src, url);
-                          }
-                      }
-                  }
+                  const processedHtml = await processHtmlImages(html.replace(/^\s*\(?(\d+)[\.\)]\s*/, ''), el);
 
                   currentQuestion = {
                       id: `word-${newQuestions.length}-${Date.now()}`,
@@ -423,104 +494,95 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
                       options: [],
                       points: 10
                   };
-                  continue;
+                  currentOptionIndex = -1;
+              } 
+              else if (optMatch && currentQuestion) {
+                  const letter = optMatch[1].toUpperCase();
+                  const index = letter.charCodeAt(0) - 65;
+                  currentOptionIndex = index;
+
+                  const optHtml = await processHtmlImages(html.replace(/^\s*\(?([A-E])[\.\)]\s*/i, ''), el);
+                  
+                  if (!currentQuestion.options) currentQuestion.options = [];
+                  currentQuestion.options[index] = optHtml;
               }
-
-              if (!currentQuestion) continue;
-
-              // 2. Detect Options (e.g. "a. ", "b. ")
-              const optMatch = text.match(/^([a-d])[\.\)]\s*(.*)/i);
-              if (optMatch) {
-                  let optHtml = cleanWordHtml(html.replace(/^([a-d])[\.\)]\s*/i, ''));
-                  const imgs = p.querySelectorAll('img');
-                  for (const img of Array.from(imgs)) {
-                      const src = img.getAttribute('src');
-                      if (src) {
-                          const url = await getPublicUrlForImage(src);
-                          if (url) {
-                              optHtml = optHtml.replace(src, url);
-                          }
-                      }
-                  }
-                  if (currentQuestion.options) {
-                      currentQuestion.options.push(optHtml);
-                  }
-                  continue;
-              }
-
-              // 3. Detect Key (e.g. "#Kunci: A")
-              const keyMatch = text.match(/#Kunci:\s*(.*)/i);
-              if (keyMatch) {
+              else if (keyMatch && currentQuestion) {
                   const rawKey = keyMatch[1].trim().toUpperCase();
                   if (currentQuestion.type === 'PG') {
-                      const keyMap: Record<string, number> = { 'A': 0, 'B': 1, 'C': 2, 'D': 3 };
+                      const keyMap: Record<string, number> = { 'A': 0, 'B': 1, 'C': 2, 'D': 3, 'E': 4 };
                       currentQuestion.correctIndex = keyMap[rawKey[0]] || 0;
                   } else if (currentQuestion.type === 'PG_KOMPLEKS') {
-                      const keyMap: Record<string, number> = { 'A': 0, 'B': 1, 'C': 2, 'D': 3 };
-                      const keys = rawKey.split(',').map(k => k.trim());
+                      const keyMap: Record<string, number> = { 'A': 0, 'B': 1, 'C': 2, 'D': 3, 'E': 4 };
+                      const keys = rawKey.split(/[,/]/).map(k => k.trim());
                       currentQuestion.correctIndices = keys.map(k => keyMap[k]).filter(idx => idx !== undefined);
                   } else if (currentQuestion.type === 'BENAR_SALAH') {
-                      currentQuestion.correctSequence = rawKey.split(',').map(k => k.trim());
+                      currentQuestion.correctSequence = rawKey.split(/[,/]/).map(k => k.trim());
                   }
-                  continue;
               }
-
-              // 4. Append to question text if it's not a new question or option or key
-              if (currentQuestion && text && !qMatch && !optMatch && !keyMatch) {
-                  if (currentQuestion.options && currentQuestion.options.length === 0) {
-                      let extraHtml = cleanWordHtml(html);
-                      const imgs = p.querySelectorAll('img');
-                      for (const img of Array.from(imgs)) {
-                          const src = img.getAttribute('src');
-                          if (src) {
-                              const url = await getPublicUrlForImage(src);
-                              if (url) {
-                                  extraHtml = extraHtml.replace(src, url);
-                              }
-                          }
-                      }
+              else if (currentQuestion && text) {
+                  // Append to current part
+                  const extraHtml = await processHtmlImages(html, el);
+                  if (currentOptionIndex === -1) {
                       currentQuestion.text += '<br/>' + extraHtml;
+                  } else if (currentQuestion.options) {
+                      if (!currentQuestion.options[currentOptionIndex]) currentQuestion.options[currentOptionIndex] = "";
+                      currentQuestion.options[currentOptionIndex] += '<br/>' + extraHtml;
                   }
               }
           }
 
-          if (currentQuestion && currentQuestion.text && currentQuestion.options?.length === 4) {
+          // Push last one
+          if (currentQuestion && currentQuestion.text) {
               newQuestions.push(currentQuestion as Question);
           }
 
-          if (newQuestions.length > 0) {
-              await db.addQuestions(targetExam.id, newQuestions);
+          // Final cleanup: ensure all options exist (fill with empty if missing)
+          const finalizedQuestions = newQuestions.map(q => {
+              if (q.type === 'PG' || q.type === 'PG_KOMPLEKS') {
+                  const options = q.options || [];
+                  // Find max index used
+                  const maxIdx = options.length > 0 ? options.length : 4;
+                  for (let i = 0; i < maxIdx; i++) {
+                      if (!options[i]) options[i] = "";
+                  }
+                  q.options = options.filter(o => o !== undefined);
+              }
+              return q;
+          });
+
+          if (finalizedQuestions.length > 0) {
+              await db.addQuestions(targetExam.id, finalizedQuestions);
               await loadData();
-              alert(`Berhasil import ${newQuestions.length} soal dari Word!`);
+              alert(`Berhasil import ${finalizedQuestions.length} soal dari Word!`);
           } else {
-              alert("Tidak ada soal yang berhasil diproses. Pastikan format sesuai template.");
+              alert("Tidak ada soal yang berhasil diproses. Pastikan format sesuai template (Nomor Soal, Opsi A-E, #Kunci).");
           }
 
       } catch (e: any) {
           console.error(e);
-          alert("Gagal memproses file ZIP. Pastikan file ZIP berisi export HTML dari Word.");
+          alert("Gagal memproses file ZIP. Pastikan file ZIP berisi export HTML dari Word (Web Page Filtered).");
       }
       setIsProcessingImport(false);
       e.target.value = '';
   };
 
   const handleExportQuestions = (exam: Exam) => {
-      const headers = ["No", "Tipe", "Jenis", "Soal", "Url Gambar", "Opsi A", "Opsi B", "Opsi C", "Opsi D", "Kunci", "Bobot"];
+      const headers = ["No", "Tipe", "Jenis", "Soal", "Url Gambar", "Opsi A", "Opsi B", "Opsi C", "Opsi D", "Opsi E", "Kunci", "Bobot"];
       const rows = exam.questions.map((q, idx) => {
-          const options = q.options || ["", "", "", ""];
+          const options = q.options || ["", "", "", "", ""];
           let keyString = '';
           
           if (q.type === 'PG') {
-              const keyMap = ['A', 'B', 'C', 'D'];
+              const keyMap = ['A', 'B', 'C', 'D', 'E'];
               keyString = typeof q.correctIndex === 'number' ? keyMap[q.correctIndex] : 'A';
           } else if (q.type === 'PG_KOMPLEKS' && q.correctIndices) {
-              const keyMap = ['A', 'B', 'C', 'D'];
+              const keyMap = ['A', 'B', 'C', 'D', 'E'];
               keyString = q.correctIndices.map(i => keyMap[i]).join(',');
           } else if (q.type === 'BENAR_SALAH' && q.correctSequence) {
               keyString = q.correctSequence.join(',');
           }
 
-          return [String(idx + 1), q.type, "UMUM", escapeCSV(q.text), escapeCSV(q.imgUrl), escapeCSV(options[0]), escapeCSV(options[1]), escapeCSV(options[2]), escapeCSV(options[3]), escapeCSV(keyString), String(q.points)].join(",");
+          return [String(idx + 1), q.type, "UMUM", escapeCSV(q.text), escapeCSV(q.imgUrl), escapeCSV(options[0]), escapeCSV(options[1]), escapeCSV(options[2]), escapeCSV(options[3]), escapeCSV(options[4]), escapeCSV(keyString), String(q.points)].join(",");
       });
       const blob = new Blob([headers.join(",") + "\n" + rows.join("\n")], { type: 'text/csv;charset=utf-8;' });
       const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.setAttribute('download', `BANK_SOAL_${exam.subject}.csv`); document.body.appendChild(link); link.click(); document.body.removeChild(link);
@@ -546,10 +608,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
                       spacing: { before: 400, after: 200 },
                   }),
                   new Paragraph({
-                      text: "1. Gunakan penomoran otomatis atau manual (1. 2. dst).",
+                      text: "1. Gunakan penomoran manual (1. 2. dst) di awal baris untuk soal.",
                   }),
                   new Paragraph({
-                      text: "2. Opsi jawaban menggunakan a. b. c. d.",
+                      text: "2. Opsi jawaban menggunakan A. B. C. D. E. (Huruf besar atau kecil).",
                   }),
                   new Paragraph({
                       text: "3. Kunci jawaban ditulis di bawah opsi dengan format #Kunci: A",
@@ -563,36 +625,39 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
                   new Paragraph({ 
                       children: [new TextRun({ text: "6. Simpan sebagai DOCX untuk backup, lalu Save As -> Web Page Filtered (.htm) untuk di-ZIP dan di-import.", bold: true })] 
                   }),
+                  new Paragraph({ 
+                      children: [new TextRun({ text: "7. Pastikan file .htm dan folder pendukungnya (jika ada gambar) berada dalam satu ZIP yang sama.", bold: true })] 
+                  }),
                   new Paragraph({ text: "", spacing: { before: 400 } }),
 
                   // Sample Questions
                   new Paragraph({ 
                       children: [new TextRun({ text: "1. Siapa presiden pertama Republik Indonesia?", bold: true })] 
                   }),
-                  new Paragraph({ text: "a. Soekarno" }),
-                  new Paragraph({ text: "b. Mohammad Hatta" }),
-                  new Paragraph({ text: "c. B.J. Habibie" }),
-                  new Paragraph({ text: "d. Abdurrahman Wahid" }),
+                  new Paragraph({ text: "A. Soekarno" }),
+                  new Paragraph({ text: "B. Mohammad Hatta" }),
+                  new Paragraph({ text: "C. B.J. Habibie" }),
+                  new Paragraph({ text: "D. Abdurrahman Wahid" }),
                   new Paragraph({ text: "#Kunci: A" }),
                   new Paragraph({ text: "" }),
 
                   new Paragraph({ 
                       children: [new TextRun({ text: "2. Manakah yang merupakan buah-buahan? (Pilihan Ganda Kompleks)", bold: true })] 
                   }),
-                  new Paragraph({ text: "a. Apel" }),
-                  new Paragraph({ text: "b. Bayam" }),
-                  new Paragraph({ text: "c. Jeruk" }),
-                  new Paragraph({ text: "d. Wortel" }),
+                  new Paragraph({ text: "A. Apel" }),
+                  new Paragraph({ text: "B. Bayam" }),
+                  new Paragraph({ text: "C. Jeruk" }),
+                  new Paragraph({ text: "D. Wortel" }),
                   new Paragraph({ text: "#Kunci: A,C" }),
                   new Paragraph({ text: "" }),
 
                   new Paragraph({ 
                       children: [new TextRun({ text: "3. Matahari terbit dari arah timur. (Benar/Salah)", bold: true })] 
                   }),
-                  new Paragraph({ text: "a. Pernyataan 1" }),
-                  new Paragraph({ text: "b. Pernyataan 2" }),
-                  new Paragraph({ text: "c. Pernyataan 3" }),
-                  new Paragraph({ text: "#Kunci: B,S,S" }),
+                  new Paragraph({ text: "A. Pernyataan 1" }),
+                  new Paragraph({ text: "B. Pernyataan 2" }),
+                  new Paragraph({ text: "C. Pernyataan 3" }),
+                  new Paragraph({ text: "#Kunci: B,B,S" }),
                   new Paragraph({ text: "(B=Benar, S=Salah)" }),
               ],
           }],
@@ -835,7 +900,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
           }
       });
 
-      const assigned = editSchoolAccess.sort();
+      const assigned = [...editSchoolAccess].sort();
       const available = schools.filter(s => 
           !assigned.includes(s) && 
           !busySchools.has(s) && 
