@@ -348,6 +348,12 @@ export const db = {
     await supabase.from('students').delete().eq('id', id);
   },
 
+  deleteAllStudents: async (): Promise<void> => {
+    // Delete all users with role 'STUDENT'
+    const { error } = await supabase.from('students').delete().eq('role', 'STUDENT');
+    if (error) throw error;
+  },
+
   resetUserStatus: async (userId: string): Promise<void> => {
     await supabase.from('students').update({ is_login: false, status: 'idle' }).eq('id', userId);
   },
