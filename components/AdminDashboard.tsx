@@ -4,7 +4,27 @@ import { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel } fro
 import { saveAs } from 'file-saver';
 import { User, Exam, UserRole, Question, QuestionType, ExamResult, AppSettings } from '../types';
 import { db } from '../services/database'; 
+import { supabase } from '../services/supabaseClient';
 import { Plus, BookOpen, Save, LogOut, Loader2, Key, RotateCcw, Clock, Upload, Download, FileText, LayoutDashboard, Settings, Printer, Filter, Calendar, FileSpreadsheet, Lock, Link, Edit, ShieldAlert, Activity, ClipboardList, Search, Unlock, Trash2, Database, School, Shuffle, X, CheckSquare, Map, CalendarDays, Flame, Volume2, AlertTriangle, UserX, Info, Check, Monitor, Users, GraduationCap, CheckCircle, XCircle, ArrowLeft, BarChart3, PieChart, Menu } from 'lucide-react';
+
+// --- HELPERS ---
+const cleanWordHtml = (html: string) => {
+    if (!html) return '';
+    // Replace common Word tags with standard HTML
+    let cleaned = html
+        .replace(/<strong[^>]*>/gi, '<b>').replace(/<\/strong>/gi, '</b>')
+        .replace(/<em[^>]*>/gi, '<i>').replace(/<\/em>/gi, '</i>')
+        .replace(/<u[^>]*>/gi, '<u>').replace(/<\/u>/gi, '</u>')
+        .replace(/<span[^>]*style="[^"]*font-weight:\s*bold[^"]*"[^>]*>(.*?)<\/span>/gi, '<b>$1</b>')
+        .replace(/<span[^>]*style="[^"]*font-style:\s*italic[^"]*"[^>]*>(.*?)<\/span>/gi, '<i>$1</i>')
+        .replace(/<span[^>]*style="[^"]*text-decoration:\s*underline[^"]*"[^>]*>(.*?)<\/span>/gi, '<u>$1</u>');
+    
+    // Keep only allowed tags
+    cleaned = cleaned.replace(/<(?!\/?(b|i|u|br|img)\b)[^>]+>/gi, '');
+    
+    // Clean up non-breaking spaces and extra whitespace
+    return cleaned.replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+};
 
 interface AdminDashboardProps {
   user: User;
@@ -91,7 +111,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
   const [editToken, setEditToken] = useState('');
   const [editDuration, setEditDuration] = useState(0);
   const [editDate, setEditDate] = useState('');
-  const [editSession, setEditSession] = useState('');
+  const [editStartTime, setEditStartTime] = useState('');
+  const [editEndTime, setEditEndTime] = useState('');
   const [editSchoolAccess, setEditSchoolAccess] = useState<string[]>([]);
   const [mappingSearch, setMappingSearch] = useState(''); 
   
@@ -173,6 +194,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
       alert("Pelanggaran di-reset.");
   };
 
+  const handleToggleExamStatus = async (examId: string, currentStatus: boolean) => {
+      const newStatus = !currentStatus;
+      await db.toggleExamStatus(examId, newStatus);
+      setExams(prev => prev.map(ex => ex.id === examId ? {...ex, isActive: newStatus} : ex));
+  };
+
+  const handleDeleteExam = async (examId: string, title: string) => {
+      if(!confirm(`Hapus mata pelajaran "${title}" beserta seluruh soalnya? Tindakan ini tidak dapat dibatalkan.`)) return;
+      await db.deleteExam(examId);
+      setExams(prev => prev.filter(ex => ex.id !== examId));
+      if(viewingQuestionsExam?.id === examId) setViewingQuestionsExam(null);
+      alert("Mata pelajaran berhasil dihapus.");
+  };
+
   const handleCreateExam = async () => {
       const title = prompt("Nama Mata Pelajaran (Contoh: Matematika 7A):");
       if(!title) return;
@@ -198,7 +233,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
       setEditToken(exam.token);
       setEditDuration(exam.durationMinutes);
       setEditDate(exam.examDate || new Date().toISOString().split('T')[0]);
-      setEditSession(exam.session || 'Sesi 1');
+      setEditStartTime(exam.startTime || '07:30');
+      setEditEndTime(exam.endTime || '09:00');
       setEditSchoolAccess(exam.schoolAccess || []); 
       setMappingSearch('');
       setIsEditModalOpen(true);
@@ -228,7 +264,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
           editToken.toUpperCase(), 
           editDuration,
           editDate,
-          editSession,
+          editStartTime,
+          editEndTime,
           editSchoolAccess
       );
       setIsEditModalOpen(false);
@@ -297,19 +334,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
           const parser = new DOMParser();
           const doc = parser.parseFromString(htmlContent, 'text/html');
           
-          // Helper to get base64 for images
-          const getBase64Image = async (src: string) => {
-              // Word HTML often uses relative paths like "filename_files/image001.png"
-              // We need to resolve this relative to the HTML file location in the ZIP
+          // Helper to get public URL for images (upload to Supabase)
+          const getPublicUrlForImage = async (src: string) => {
               const htmlDir = htmlFile.includes('/') ? htmlFile.substring(0, htmlFile.lastIndexOf('/') + 1) : '';
               const imgPath = decodeURIComponent(src.replace(/\\/g, '/'));
               const fullPath = htmlDir + imgPath;
               
-              // Try direct path, then try without the subfolder if it fails
               let imgZipFile = zip.files[fullPath] || zip.files[imgPath];
-              
               if (!imgZipFile) {
-                  // Try finding by filename only if path doesn't match
                   const fileName = imgPath.split('/').pop();
                   const foundKey = Object.keys(zip.files).find(k => k.endsWith('/' + fileName) || k === fileName);
                   if (foundKey) imgZipFile = zip.files[foundKey];
@@ -317,11 +349,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
 
               if (imgZipFile) {
                   const blob = await imgZipFile.async('blob');
-                  return new Promise<string>((resolve) => {
-                      const reader = new FileReader();
-                      reader.onloadend = () => resolve(reader.result as string);
-                      reader.readAsDataURL(blob);
-                  });
+                  const fileName = imgPath.split('/').pop() || 'image.png';
+                  
+                  try {
+                      // Use a public bucket named 'exam-assets'
+                      const { data, error } = await supabase.storage
+                          .from('exam-assets')
+                          .upload(`questions/${Date.now()}-${fileName}`, blob);
+                      
+                      if (error) throw error;
+                      
+                      const { data: { publicUrl } } = supabase.storage
+                          .from('exam-assets')
+                          .getPublicUrl(data.path);
+                      
+                      return publicUrl;
+                  } catch (err) {
+                      console.error("Storage upload failed, falling back to base64", err);
+                      return new Promise<string>((resolve) => {
+                          const reader = new FileReader();
+                          reader.onloadend = () => resolve(reader.result as string);
+                          reader.readAsDataURL(blob);
+                      });
+                  }
               }
               return null;
           };
@@ -333,19 +383,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
           for (let i = 0; i < paragraphs.length; i++) {
               const p = paragraphs[i];
               const text = p.textContent?.trim() || '';
+              const html = p.innerHTML;
               
               // 1. Detect Question Start (e.g. "1. ", "2. ")
               const qMatch = text.match(/^(\d+)[\.\)]\s*(.*)/);
               if (qMatch) {
-                  // Save previous question if complete
                   if (currentQuestion && currentQuestion.text && currentQuestion.options?.length === 4) {
                       newQuestions.push(currentQuestion as Question);
                   }
 
-                  let qText = qMatch[2].trim();
                   let qType: QuestionType = 'PG';
+                  let qText = qMatch[2].trim();
 
-                  // Detect Type from text
                   if (qText.toLowerCase().includes('(pilihan ganda kompleks)')) {
                       qType = 'PG_KOMPLEKS';
                       qText = qText.replace(/\(pilihan ganda kompleks\)/gi, '').trim();
@@ -354,22 +403,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
                       qText = qText.replace(/\(benar\/salah\)/gi, '').trim();
                   }
 
-                  // Check for images in this paragraph
-                  const img = p.querySelector('img');
-                  let imgUrl: string | undefined = undefined;
-                  if (img) {
+                  // Process images in this paragraph
+                  let processedHtml = cleanWordHtml(html.replace(/^(\d+)[\.\)]\s*/, ''));
+                  const imgs = p.querySelectorAll('img');
+                  for (const img of Array.from(imgs)) {
                       const src = img.getAttribute('src');
                       if (src) {
-                          const b64 = await getBase64Image(src);
-                          if (b64) imgUrl = b64;
+                          const url = await getPublicUrlForImage(src);
+                          if (url) {
+                              processedHtml = processedHtml.replace(src, url);
+                          }
                       }
                   }
 
                   currentQuestion = {
                       id: `word-${newQuestions.length}-${Date.now()}`,
                       type: qType,
-                      text: qText,
-                      imgUrl: imgUrl,
+                      text: processedHtml,
                       options: [],
                       points: 10
                   };
@@ -381,9 +431,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
               // 2. Detect Options (e.g. "a. ", "b. ")
               const optMatch = text.match(/^([a-d])[\.\)]\s*(.*)/i);
               if (optMatch) {
-                  const optText = optMatch[2].trim();
+                  let optHtml = cleanWordHtml(html.replace(/^([a-d])[\.\)]\s*/i, ''));
+                  const imgs = p.querySelectorAll('img');
+                  for (const img of Array.from(imgs)) {
+                      const src = img.getAttribute('src');
+                      if (src) {
+                          const url = await getPublicUrlForImage(src);
+                          if (url) {
+                              optHtml = optHtml.replace(src, url);
+                          }
+                      }
+                  }
                   if (currentQuestion.options) {
-                      currentQuestion.options.push(optText);
+                      currentQuestion.options.push(optHtml);
                   }
                   continue;
               }
@@ -392,7 +452,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
               const keyMatch = text.match(/#Kunci:\s*(.*)/i);
               if (keyMatch) {
                   const rawKey = keyMatch[1].trim().toUpperCase();
-                  
                   if (currentQuestion.type === 'PG') {
                       const keyMap: Record<string, number> = { 'A': 0, 'B': 1, 'C': 2, 'D': 3 };
                       currentQuestion.correctIndex = keyMap[rawKey[0]] || 0;
@@ -408,24 +467,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
 
               // 4. Append to question text if it's not a new question or option or key
               if (currentQuestion && text && !qMatch && !optMatch && !keyMatch) {
-                  // If we don't have 4 options yet, it might be part of the question text
                   if (currentQuestion.options && currentQuestion.options.length === 0) {
-                      currentQuestion.text += ' ' + text;
-                      
-                      // Check for images in this additional paragraph
-                      const img = p.querySelector('img');
-                      if (img && !currentQuestion.imgUrl) {
+                      let extraHtml = cleanWordHtml(html);
+                      const imgs = p.querySelectorAll('img');
+                      for (const img of Array.from(imgs)) {
                           const src = img.getAttribute('src');
                           if (src) {
-                              const b64 = await getBase64Image(src);
-                              if (b64) currentQuestion.imgUrl = b64;
+                              const url = await getPublicUrlForImage(src);
+                              if (url) {
+                                  extraHtml = extraHtml.replace(src, url);
+                              }
                           }
                       }
+                      currentQuestion.text += '<br/>' + extraHtml;
                   }
               }
           }
 
-          // Push the last question
           if (currentQuestion && currentQuestion.text && currentQuestion.options?.length === 4) {
               newQuestions.push(currentQuestion as Question);
           }
@@ -772,7 +830,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
       
       exams.forEach(ex => {
           if (editingExam && ex.id === editingExam.id) return;
-          if (ex.examDate === editDate && ex.session === editSession && ex.schoolAccess) {
+          if (ex.examDate === editDate && ex.startTime === editStartTime && ex.endTime === editEndTime && ex.schoolAccess) {
               ex.schoolAccess.forEach(s => busySchools.add(s));
           }
       });
@@ -1194,7 +1252,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
                                               <span className="font-bold bg-gray-200 w-8 h-8 flex items-center justify-center rounded-full text-sm">{i+1}</span>
                                               <span className="text-xs font-bold px-2 py-0.5 bg-blue-100 text-blue-700 rounded">{q.type}</span>
                                           </div>
-                                          <p className="text-gray-800 mt-2 text-sm">{q.text}</p>
+                                          <div className="text-gray-800 mt-2 text-sm q-content-preview" dangerouslySetInnerHTML={{ __html: q.text }}></div>
                                       </div>
                                   </div>
                               ))}
@@ -1203,13 +1261,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
                   ) : (
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                           {exams.map(ex => (
-                              <div key={ex.id} className="bg-white p-5 rounded-xl border hover:shadow-lg transition cursor-pointer group" onClick={() => setViewingQuestionsExam(ex)}>
+                              <div key={ex.id} className={`bg-white p-5 rounded-xl border hover:shadow-lg transition cursor-pointer group relative ${!ex.isActive ? 'opacity-60 grayscale' : ''}`} onClick={() => setViewingQuestionsExam(ex)}>
                                   <div className="flex justify-between items-start mb-4">
-                                      <div className="bg-blue-50 p-3 rounded-lg group-hover:bg-blue-100 transition"><Database size={24} className="text-blue-600"/></div>
-                                      <span className="text-xs font-bold bg-gray-100 px-2 py-1 rounded text-gray-600">{ex.questionCount} Items</span>
+                                      <div className={`p-3 rounded-lg transition ${ex.isActive ? 'bg-blue-50 group-hover:bg-blue-100' : 'bg-gray-100'}`}>
+                                          <Database size={24} className={ex.isActive ? 'text-blue-600' : 'text-gray-400'}/>
+                                      </div>
+                                      <div className="flex gap-1">
+                                          <button 
+                                              onClick={(e) => { e.stopPropagation(); handleToggleExamStatus(ex.id, ex.isActive); }}
+                                              className={`p-1.5 rounded border transition ${ex.isActive ? 'bg-green-50 text-green-600 border-green-200 hover:bg-green-100' : 'bg-gray-50 text-gray-400 border-gray-200 hover:bg-gray-100'}`}
+                                              title={ex.isActive ? "Nonaktifkan Mapel" : "Aktifkan Mapel"}
+                                          >
+                                              {ex.isActive ? <CheckCircle size={16}/> : <XCircle size={16}/>}
+                                          </button>
+                                          <button 
+                                              onClick={(e) => { e.stopPropagation(); handleDeleteExam(ex.id, ex.title); }}
+                                              className="p-1.5 bg-red-50 text-red-600 rounded border border-red-200 hover:bg-red-100 transition"
+                                              title="Hapus Mapel"
+                                          >
+                                              <Trash2 size={16}/>
+                                          </button>
+                                      </div>
                                   </div>
                                   <h4 className="font-bold text-gray-800 text-lg mb-1">{ex.subject}</h4>
-                                  <p className="text-sm text-gray-500 line-clamp-1">Token: {ex.token}</p>
+                                  <div className="flex justify-between items-center mt-2">
+                                      <span className="text-xs font-bold bg-gray-100 px-2 py-1 rounded text-gray-600">{ex.questionCount} Items</span>
+                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${ex.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-500'}`}>
+                                          {ex.isActive ? 'Aktif' : 'Nonaktif'}
+                                      </span>
+                                  </div>
                               </div>
                           ))}
                       </div>
@@ -1226,7 +1306,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
                           <thead className="bg-gray-50 font-bold border-b">
                             <tr>
                                 <th className="p-3">Mapel</th>
-                                <th className="p-3">Tanggal & Sesi</th>
+                                <th className="p-3">Jadwal Ujian</th>
                                 <th className="p-3">Durasi</th>
                                 <th className="p-3">Token</th>
                                 <th className="p-3">Akses Kelas</th>
@@ -1236,11 +1316,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
                           <tbody className="divide-y">
                               {exams.map(ex => (
                                   <tr key={ex.id}>
-                                      <td className="p-3 font-medium">{ex.title}</td>
+                                      <td className="p-3 font-medium">
+                                          <div className="flex items-center gap-2">
+                                              <span className={`w-2 h-2 rounded-full ${ex.isActive ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                                              {ex.title}
+                                          </div>
+                                      </td>
                                       <td className="p-3">
                                           <div className="flex flex-col">
                                               <span className="font-bold">{ex.examDate ? new Date(ex.examDate).toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' }) : '-'}</span>
-                                              <span className="text-xs text-blue-600 font-bold bg-blue-50 px-2 py-0.5 rounded w-fit mt-1">{ex.session || 'Sesi 1'}</span>
+                                              <span className="text-xs text-blue-600 font-bold bg-blue-50 px-2 py-0.5 rounded w-fit mt-1 flex items-center">
+                                                  <Clock size={10} className="mr-1"/> {ex.startTime || '07:30'} - {ex.endTime || '09:00'}
+                                              </span>
                                           </div>
                                       </td>
                                       <td className="p-3">{ex.durationMinutes} Menit</td>
@@ -1575,13 +1662,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
                               <label className="block text-sm font-bold text-gray-700 mb-1">Tanggal Ujian</label>
                               <input type="date" className="w-full border rounded p-2 text-sm" value={editDate} onChange={e => setEditDate(e.target.value)} />
                           </div>
-                          <div>
-                              <label className="block text-sm font-bold text-gray-700 mb-1">Sesi Ujian</label>
-                              <select className="w-full border rounded p-2 text-sm" value={editSession} onChange={e => setEditSession(e.target.value)}>
-                                  <option>Sesi 1</option>
-                                  <option>Sesi 2</option>
-                                  <option>Sesi 3</option>
-                              </select>
+                          <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                  <label className="block text-sm font-bold text-gray-700 mb-1">Waktu Mulai</label>
+                                  <input type="time" className="w-full border rounded p-2 text-sm" value={editStartTime} onChange={e => setEditStartTime(e.target.value)} />
+                              </div>
+                              <div>
+                                  <label className="block text-sm font-bold text-gray-700 mb-1">Waktu Selesai</label>
+                                  <input type="time" className="w-full border rounded p-2 text-sm" value={editEndTime} onChange={e => setEditEndTime(e.target.value)} />
+                              </div>
                           </div>
                           <div>
                               <label className="block text-sm font-bold text-gray-700 mb-1">Durasi (Menit)</label>

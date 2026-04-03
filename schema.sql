@@ -23,7 +23,9 @@ CREATE TABLE subjects (
     question_count INTEGER DEFAULT 0,
     token TEXT,
     exam_date TEXT, -- Stored as YYYY-MM-DD string to match frontend logic
-    session TEXT DEFAULT 'Sesi 1',
+    start_time TEXT DEFAULT '07:30',
+    end_time TEXT DEFAULT '09:00',
+    is_active BOOLEAN DEFAULT TRUE,
     school_access JSONB DEFAULT '[]'::jsonb, -- Array of strings
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
 );

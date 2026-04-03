@@ -178,10 +178,11 @@ export const db = {
             durationMinutes: sub.duration,
             questionCount: sub.question_count,
             token: sub.token,
-            isActive: true,
+            isActive: sub.is_active !== undefined ? sub.is_active : true,
             questions: mappedQuestions,
             examDate: sub.exam_date,
-            session: sub.session,
+            startTime: sub.start_time,
+            endTime: sub.end_time,
             schoolAccess: schoolAccess
         });
     }
@@ -190,14 +191,23 @@ export const db = {
   },
 
   // Updated to support Full Mapping
-  updateExamMapping: async (examId: string, token: string, durationMinutes: number, examDate: string, session: string, schoolAccess: string[]): Promise<void> => {
+  updateExamMapping: async (examId: string, token: string, durationMinutes: number, examDate: string, startTime: string, endTime: string, schoolAccess: string[]): Promise<void> => {
     await supabase.from('subjects').update({ 
       token: token,
       duration: durationMinutes,
       exam_date: examDate,
-      session: session,
+      start_time: startTime,
+      end_time: endTime,
       school_access: schoolAccess // Supabase handles array to JSONB auto conversion
     }).eq('id', examId);
+  },
+
+  toggleExamStatus: async (examId: string, isActive: boolean): Promise<void> => {
+    await supabase.from('subjects').update({ is_active: isActive }).eq('id', examId);
+  },
+
+  deleteExam: async (examId: string): Promise<void> => {
+    await supabase.from('subjects').delete().eq('id', examId);
   },
 
   createExam: async (exam: Exam): Promise<void> => {

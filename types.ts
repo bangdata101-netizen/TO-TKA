@@ -49,12 +49,13 @@ export interface Exam {
   durationMinutes: number; // Mapped from "duration"
   questionCount: number;   // Mapped from "question_count"
   token: string;
-  isActive: boolean; // Virtual (always true based on schema)
+  isActive: boolean; 
   questions: Question[]; // Populated via relation
   
   // Mapping Fields
   examDate?: string; // Mapped from "exam_date"
-  session?: string;  // Mapped from "session"
+  startTime?: string; // Mapped from "start_time"
+  endTime?: string;   // Mapped from "end_time"
   schoolAccess?: string[]; // Mapped from "school_access" (Now represents Class Access)
 
   // Virtual fields for UI compatibility

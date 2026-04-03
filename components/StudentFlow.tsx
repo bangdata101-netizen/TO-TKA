@@ -50,8 +50,15 @@ export const StudentFlow: React.FC<StudentFlowProps> = ({ user, onStartExam, onL
 
   const loadExamsAndResults = async () => {
     // 1. Get Exams (Subjects)
-    const exams = await db.getExams('SD'); // Argument mostly ignored in new DB logic but kept for type signature
-    setAvailableExams(exams);
+    const exams = await db.getExams('SD'); 
+    
+    // Filter by isActive and Class Access
+    const filteredExams = exams.filter(ex => {
+        const isClassAllowed = !ex.schoolAccess || ex.schoolAccess.length === 0 || (user.school && ex.schoolAccess.includes(user.school));
+        return ex.isActive && isClassAllowed;
+    });
+    
+    setAvailableExams(filteredExams);
 
     // 2. Get Results for this user
     const allResults = await db.getAllResults();
@@ -62,6 +69,35 @@ export const StudentFlow: React.FC<StudentFlowProps> = ({ user, onStartExam, onL
 
   const handleSelectExam = (exam: Exam) => {
     if (completedExams.includes(exam.id)) return; 
+    
+    // Check Time Window
+    if (exam.examDate && exam.startTime && exam.endTime) {
+        const now = new Date();
+        const todayStr = now.toISOString().split('T')[0];
+        
+        // If different date
+        if (exam.examDate !== todayStr) {
+            alert(`Ujian ini dijadwalkan pada tanggal ${new Date(exam.examDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}`);
+            return;
+        }
+        
+        const currentTime = now.getHours() * 60 + now.getMinutes();
+        const [startH, startM] = exam.startTime.split(':').map(Number);
+        const [endH, endM] = exam.endTime.split(':').map(Number);
+        
+        const startTimeVal = startH * 60 + startM;
+        const endTimeVal = endH * 60 + endM;
+        
+        if (currentTime < startTimeVal) {
+            alert(`Ujian belum dimulai. Silakan kembali pada pukul ${exam.startTime}`);
+            return;
+        }
+        
+        if (currentTime > endTimeVal) {
+            alert(`Waktu ujian telah berakhir (Selesai pukul ${exam.endTime})`);
+            return;
+        }
+    }
     
     setSelectedExam(exam);
     setStep('DATA_CONFIRM');

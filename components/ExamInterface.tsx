@@ -350,7 +350,7 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({ user, exam, onComp
                             <div className="w-8 h-8 rounded-full border-2 border-gray-300 mr-3 flex-shrink-0 flex items-center justify-center radio-dot transition-all font-bold text-gray-400" style={{ '--tw-border-color': themeColor } as React.CSSProperties}>
                                 {String.fromCharCode(65+idx)}
                             </div>
-                            <span className={`${getFontSizeClass()} text-gray-700`}>{opt}</span>
+                            <span className={`${getFontSizeClass()} text-gray-700`} dangerouslySetInnerHTML={{ __html: opt }}></span>
                         </div>
                     </label>
                 ))}
@@ -373,7 +373,7 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({ user, exam, onComp
                             <div className="w-6 h-6 rounded border-2 border-gray-300 mr-3 flex-shrink-0 flex items-center justify-center peer-checked:bg-blue-50 peer-checked:border-blue-500">
                                 <CheckCircle size={14} className="text-white opacity-0 peer-checked:opacity-100" />
                             </div>
-                            <span className={`${getFontSizeClass()} text-gray-700`}>{opt}</span>
+                            <span className={`${getFontSizeClass()} text-gray-700`} dangerouslySetInnerHTML={{ __html: opt }}></span>
                         </div>
                     </label>
                 ))}
@@ -394,7 +394,7 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({ user, exam, onComp
                           const currentAns = answers[currentQuestionIndex]?.[idx];
                           return (
                               <div key={idx} className="p-3 grid grid-cols-12 gap-2 items-center border-b last:border-0 hover:bg-gray-50">
-                                  <div className={`col-span-8 ${getFontSizeClass()}`}>{opt}</div>
+                                  <div className={`col-span-8 ${getFontSizeClass()}`} dangerouslySetInnerHTML={{ __html: opt }}></div>
                                   <div className="col-span-2 flex justify-center">
                                       <label className="cursor-pointer">
                                           <input 
@@ -657,8 +657,7 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({ user, exam, onComp
                      </div>
                  </div>
             )}
-            <div className={`${getFontSizeClass()} text-gray-800 leading-relaxed whitespace-pre-wrap`}>
-                {currentQ.text}
+            <div className={`${getFontSizeClass()} text-gray-800 leading-relaxed q-content`} dangerouslySetInnerHTML={{ __html: currentQ.text }}>
             </div>
         </div>
 
