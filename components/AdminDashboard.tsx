@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import JSZip from 'jszip';
+import { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel } from 'docx';
+import { saveAs } from 'file-saver';
 import { User, Exam, UserRole, Question, QuestionType, ExamResult, AppSettings } from '../types';
 import { db } from '../services/database'; 
 import { Plus, BookOpen, Save, LogOut, Loader2, Key, RotateCcw, Clock, Upload, Download, FileText, LayoutDashboard, Settings, Printer, Filter, Calendar, FileSpreadsheet, Lock, Link, Edit, ShieldAlert, Activity, ClipboardList, Search, Unlock, Trash2, Database, School, Shuffle, X, CheckSquare, Map, CalendarDays, Flame, Volume2, AlertTriangle, UserX, Info, Check, Monitor, Users, GraduationCap, CheckCircle, XCircle, ArrowLeft, BarChart3, PieChart, Menu } from 'lucide-react';
@@ -464,6 +466,82 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
       });
       const blob = new Blob([headers.join(",") + "\n" + rows.join("\n")], { type: 'text/csv;charset=utf-8;' });
       const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.setAttribute('download', `BANK_SOAL_${exam.subject}.csv`); document.body.appendChild(link); link.click(); document.body.removeChild(link);
+  };
+
+  const downloadWordTemplate = async () => {
+      const doc = new Document({
+          sections: [{
+              properties: {},
+              children: [
+                  new Paragraph({
+                      text: "TEMPLATE SOAL UJIAN (FORMAT WORD)",
+                      heading: HeadingLevel.HEADING_1,
+                      alignment: AlignmentType.CENTER,
+                  }),
+                  new Paragraph({
+                      children: [
+                          new TextRun({
+                              text: "INSTRUKSI PENGGUNAAN:",
+                              bold: true,
+                          }),
+                      ],
+                      spacing: { before: 400, after: 200 },
+                  }),
+                  new Paragraph({
+                      text: "1. Gunakan penomoran otomatis atau manual (1. 2. dst).",
+                  }),
+                  new Paragraph({
+                      text: "2. Opsi jawaban menggunakan a. b. c. d.",
+                  }),
+                  new Paragraph({
+                      text: "3. Kunci jawaban ditulis di bawah opsi dengan format #Kunci: A",
+                  }),
+                  new Paragraph({
+                      text: "4. Untuk Pilihan Ganda Kompleks, tambahkan (Pilihan Ganda Kompleks) di akhir soal dan kunci dipisah koma (misal #Kunci: A,C).",
+                  }),
+                  new Paragraph({
+                      text: "5. Untuk Benar/Salah, tambahkan (Benar/Salah) di akhir soal dan kunci dipisah koma (misal #Kunci: B,S,S).",
+                  }),
+                  new Paragraph({ 
+                      children: [new TextRun({ text: "6. Simpan sebagai DOCX untuk backup, lalu Save As -> Web Page Filtered (.htm) untuk di-ZIP dan di-import.", bold: true })] 
+                  }),
+                  new Paragraph({ text: "", spacing: { before: 400 } }),
+
+                  // Sample Questions
+                  new Paragraph({ 
+                      children: [new TextRun({ text: "1. Siapa presiden pertama Republik Indonesia?", bold: true })] 
+                  }),
+                  new Paragraph({ text: "a. Soekarno" }),
+                  new Paragraph({ text: "b. Mohammad Hatta" }),
+                  new Paragraph({ text: "c. B.J. Habibie" }),
+                  new Paragraph({ text: "d. Abdurrahman Wahid" }),
+                  new Paragraph({ text: "#Kunci: A" }),
+                  new Paragraph({ text: "" }),
+
+                  new Paragraph({ 
+                      children: [new TextRun({ text: "2. Manakah yang merupakan buah-buahan? (Pilihan Ganda Kompleks)", bold: true })] 
+                  }),
+                  new Paragraph({ text: "a. Apel" }),
+                  new Paragraph({ text: "b. Bayam" }),
+                  new Paragraph({ text: "c. Jeruk" }),
+                  new Paragraph({ text: "d. Wortel" }),
+                  new Paragraph({ text: "#Kunci: A,C" }),
+                  new Paragraph({ text: "" }),
+
+                  new Paragraph({ 
+                      children: [new TextRun({ text: "3. Matahari terbit dari arah timur. (Benar/Salah)", bold: true })] 
+                  }),
+                  new Paragraph({ text: "a. Pernyataan 1" }),
+                  new Paragraph({ text: "b. Pernyataan 2" }),
+                  new Paragraph({ text: "c. Pernyataan 3" }),
+                  new Paragraph({ text: "#Kunci: B,S,S" }),
+                  new Paragraph({ text: "(B=Benar, S=Salah)" }),
+              ],
+          }],
+      });
+
+      const blob = await Packer.toBlob(doc);
+      saveAs(blob, "Template_Soal_Word.docx");
   };
 
   const onQuestionFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1102,7 +1180,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
                           <div className="flex flex-wrap gap-2 mb-6 bg-gray-50 p-4 rounded-lg border">
                                <button onClick={() => {setTargetExamForAdd(viewingQuestionsExam); setIsAddQuestionModalOpen(true);}} className="bg-green-600 text-white px-4 py-2 rounded text-sm font-bold flex items-center hover:bg-green-700 transition"><Plus size={16} className="mr-2"/> Input Manual</button>
                                <div className="h-8 w-px bg-gray-300 mx-2"></div>
-                               <button onClick={downloadQuestionTemplate} className="bg-gray-600 text-white px-4 py-2 rounded text-sm font-bold flex items-center hover:bg-gray-700 transition"><FileText size={16} className="mr-2"/> Download Template</button>
+                               <button onClick={downloadQuestionTemplate} className="bg-gray-600 text-white px-4 py-2 rounded text-sm font-bold flex items-center hover:bg-gray-700 transition"><FileText size={16} className="mr-2"/> Template CSV</button>
+                               <button onClick={downloadWordTemplate} className="bg-indigo-600 text-white px-4 py-2 rounded text-sm font-bold flex items-center hover:bg-indigo-700 transition"><FileText size={16} className="mr-2"/> Template Word</button>
                                <button onClick={() => triggerImportQuestions(viewingQuestionsExam.id)} className="bg-orange-500 text-white px-4 py-2 rounded text-sm font-bold flex items-center hover:bg-orange-600 transition"><Upload size={16} className="mr-2"/> Import CSV</button>
                                <button onClick={() => triggerImportWord(viewingQuestionsExam.id)} className="bg-indigo-600 text-white px-4 py-2 rounded text-sm font-bold flex items-center hover:bg-indigo-700 transition"><FileText size={16} className="mr-2"/> Import Word (ZIP)</button>
                                <button onClick={() => handleExportQuestions(viewingQuestionsExam)} className="bg-blue-500 text-white px-4 py-2 rounded text-sm font-bold flex items-center hover:bg-blue-600 transition"><Download size={16} className="mr-2"/> Export CSV</button>
