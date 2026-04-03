@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import JSZip from 'jszip';
 import { User, Exam, UserRole, Question, QuestionType, ExamResult, AppSettings } from '../types';
 import { db } from '../services/database'; 
 import { Plus, BookOpen, Save, LogOut, Loader2, Key, RotateCcw, Clock, Upload, Download, FileText, LayoutDashboard, Settings, Printer, Filter, Calendar, FileSpreadsheet, Lock, Link, Edit, ShieldAlert, Activity, ClipboardList, Search, Unlock, Trash2, Database, School, Shuffle, X, CheckSquare, Map, CalendarDays, Flame, Volume2, AlertTriangle, UserX, Info, Check, Monitor, Users, GraduationCap, CheckCircle, XCircle, ArrowLeft, BarChart3, PieChart, Menu } from 'lucide-react';
@@ -109,6 +110,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
   const [importTargetExamId, setImportTargetExamId] = useState<string | null>(null);
   const studentFileRef = useRef<HTMLInputElement>(null);
   const questionFileRef = useRef<HTMLInputElement>(null);
+  const wordFileRef = useRef<HTMLInputElement>(null);
   
   // FILTERS & CARD PRINTING
   const [selectedSchoolFilter, setSelectedSchoolFilter] = useState<string>('ALL'); // For Peserta & Monitoring
@@ -270,6 +272,178 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
 
   const triggerImportQuestions = (examId: string) => { setImportTargetExamId(examId); setTimeout(() => questionFileRef.current?.click(), 100); };
   
+  const triggerImportWord = (examId: string) => { setImportTargetExamId(examId); setTimeout(() => wordFileRef.current?.click(), 100); };
+
+  const onWordFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (!e.target.files?.[0] || !importTargetExamId) return;
+      const file = e.target.files[0];
+      const targetExam = exams.find(ex => ex.id === importTargetExamId);
+      if (!targetExam) return;
+
+      setIsProcessingImport(true);
+      try {
+          const zip = await JSZip.loadAsync(file);
+          const htmlFile = Object.keys(zip.files).find(name => name.endsWith('.htm') || name.endsWith('.html'));
+          
+          if (!htmlFile) {
+              alert("File HTML tidak ditemukan dalam ZIP.");
+              setIsProcessingImport(false);
+              return;
+          }
+
+          const htmlContent = await zip.files[htmlFile].async('string');
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(htmlContent, 'text/html');
+          
+          // Helper to get base64 for images
+          const getBase64Image = async (src: string) => {
+              // Word HTML often uses relative paths like "filename_files/image001.png"
+              // We need to resolve this relative to the HTML file location in the ZIP
+              const htmlDir = htmlFile.includes('/') ? htmlFile.substring(0, htmlFile.lastIndexOf('/') + 1) : '';
+              const imgPath = decodeURIComponent(src.replace(/\\/g, '/'));
+              const fullPath = htmlDir + imgPath;
+              
+              // Try direct path, then try without the subfolder if it fails
+              let imgZipFile = zip.files[fullPath] || zip.files[imgPath];
+              
+              if (!imgZipFile) {
+                  // Try finding by filename only if path doesn't match
+                  const fileName = imgPath.split('/').pop();
+                  const foundKey = Object.keys(zip.files).find(k => k.endsWith('/' + fileName) || k === fileName);
+                  if (foundKey) imgZipFile = zip.files[foundKey];
+              }
+
+              if (imgZipFile) {
+                  const blob = await imgZipFile.async('blob');
+                  return new Promise<string>((resolve) => {
+                      const reader = new FileReader();
+                      reader.onloadend = () => resolve(reader.result as string);
+                      reader.readAsDataURL(blob);
+                  });
+              }
+              return null;
+          };
+
+          const paragraphs = Array.from(doc.querySelectorAll('p, div'));
+          const newQuestions: Question[] = [];
+          let currentQuestion: Partial<Question> | null = null;
+
+          for (let i = 0; i < paragraphs.length; i++) {
+              const p = paragraphs[i];
+              const text = p.textContent?.trim() || '';
+              
+              // 1. Detect Question Start (e.g. "1. ", "2. ")
+              const qMatch = text.match(/^(\d+)[\.\)]\s*(.*)/);
+              if (qMatch) {
+                  // Save previous question if complete
+                  if (currentQuestion && currentQuestion.text && currentQuestion.options?.length === 4) {
+                      newQuestions.push(currentQuestion as Question);
+                  }
+
+                  let qText = qMatch[2].trim();
+                  let qType: QuestionType = 'PG';
+
+                  // Detect Type from text
+                  if (qText.toLowerCase().includes('(pilihan ganda kompleks)')) {
+                      qType = 'PG_KOMPLEKS';
+                      qText = qText.replace(/\(pilihan ganda kompleks\)/gi, '').trim();
+                  } else if (qText.toLowerCase().includes('(benar/salah)')) {
+                      qType = 'BENAR_SALAH';
+                      qText = qText.replace(/\(benar\/salah\)/gi, '').trim();
+                  }
+
+                  // Check for images in this paragraph
+                  const img = p.querySelector('img');
+                  let imgUrl: string | undefined = undefined;
+                  if (img) {
+                      const src = img.getAttribute('src');
+                      if (src) {
+                          const b64 = await getBase64Image(src);
+                          if (b64) imgUrl = b64;
+                      }
+                  }
+
+                  currentQuestion = {
+                      id: `word-${newQuestions.length}-${Date.now()}`,
+                      type: qType,
+                      text: qText,
+                      imgUrl: imgUrl,
+                      options: [],
+                      points: 10
+                  };
+                  continue;
+              }
+
+              if (!currentQuestion) continue;
+
+              // 2. Detect Options (e.g. "a. ", "b. ")
+              const optMatch = text.match(/^([a-d])[\.\)]\s*(.*)/i);
+              if (optMatch) {
+                  const optText = optMatch[2].trim();
+                  if (currentQuestion.options) {
+                      currentQuestion.options.push(optText);
+                  }
+                  continue;
+              }
+
+              // 3. Detect Key (e.g. "#Kunci: A")
+              const keyMatch = text.match(/#Kunci:\s*(.*)/i);
+              if (keyMatch) {
+                  const rawKey = keyMatch[1].trim().toUpperCase();
+                  
+                  if (currentQuestion.type === 'PG') {
+                      const keyMap: Record<string, number> = { 'A': 0, 'B': 1, 'C': 2, 'D': 3 };
+                      currentQuestion.correctIndex = keyMap[rawKey[0]] || 0;
+                  } else if (currentQuestion.type === 'PG_KOMPLEKS') {
+                      const keyMap: Record<string, number> = { 'A': 0, 'B': 1, 'C': 2, 'D': 3 };
+                      const keys = rawKey.split(',').map(k => k.trim());
+                      currentQuestion.correctIndices = keys.map(k => keyMap[k]).filter(idx => idx !== undefined);
+                  } else if (currentQuestion.type === 'BENAR_SALAH') {
+                      currentQuestion.correctSequence = rawKey.split(',').map(k => k.trim());
+                  }
+                  continue;
+              }
+
+              // 4. Append to question text if it's not a new question or option or key
+              if (currentQuestion && text && !qMatch && !optMatch && !keyMatch) {
+                  // If we don't have 4 options yet, it might be part of the question text
+                  if (currentQuestion.options && currentQuestion.options.length === 0) {
+                      currentQuestion.text += ' ' + text;
+                      
+                      // Check for images in this additional paragraph
+                      const img = p.querySelector('img');
+                      if (img && !currentQuestion.imgUrl) {
+                          const src = img.getAttribute('src');
+                          if (src) {
+                              const b64 = await getBase64Image(src);
+                              if (b64) currentQuestion.imgUrl = b64;
+                          }
+                      }
+                  }
+              }
+          }
+
+          // Push the last question
+          if (currentQuestion && currentQuestion.text && currentQuestion.options?.length === 4) {
+              newQuestions.push(currentQuestion as Question);
+          }
+
+          if (newQuestions.length > 0) {
+              await db.addQuestions(targetExam.id, newQuestions);
+              await loadData();
+              alert(`Berhasil import ${newQuestions.length} soal dari Word!`);
+          } else {
+              alert("Tidak ada soal yang berhasil diproses. Pastikan format sesuai template.");
+          }
+
+      } catch (e: any) {
+          console.error(e);
+          alert("Gagal memproses file ZIP. Pastikan file ZIP berisi export HTML dari Word.");
+      }
+      setIsProcessingImport(false);
+      e.target.value = '';
+  };
+
   const handleExportQuestions = (exam: Exam) => {
       const headers = ["No", "Tipe", "Jenis", "Soal", "Url Gambar", "Opsi A", "Opsi B", "Opsi C", "Opsi D", "Kunci", "Bobot"];
       const rows = exam.questions.map((q, idx) => {
@@ -800,6 +974,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
     <div className="flex h-screen bg-gray-100 font-sans overflow-hidden print:h-auto print:overflow-visible">
       <input type="file" ref={studentFileRef} className="hidden" accept=".csv" onChange={onStudentFileChange} />
       <input type="file" ref={questionFileRef} className="hidden" accept=".csv" onChange={onQuestionFileChange} />
+      <input type="file" ref={wordFileRef} className="hidden" accept=".zip" onChange={onWordFileChange} />
 
       {/* SIDEBAR */}
       <aside className="w-16 md:w-64 flex-shrink-0 text-white flex flex-col shadow-xl z-20 transition-all duration-300 print:hidden" style={{ backgroundColor: themeColor }}>
@@ -929,6 +1104,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
                                <div className="h-8 w-px bg-gray-300 mx-2"></div>
                                <button onClick={downloadQuestionTemplate} className="bg-gray-600 text-white px-4 py-2 rounded text-sm font-bold flex items-center hover:bg-gray-700 transition"><FileText size={16} className="mr-2"/> Download Template</button>
                                <button onClick={() => triggerImportQuestions(viewingQuestionsExam.id)} className="bg-orange-500 text-white px-4 py-2 rounded text-sm font-bold flex items-center hover:bg-orange-600 transition"><Upload size={16} className="mr-2"/> Import CSV</button>
+                               <button onClick={() => triggerImportWord(viewingQuestionsExam.id)} className="bg-indigo-600 text-white px-4 py-2 rounded text-sm font-bold flex items-center hover:bg-indigo-700 transition"><FileText size={16} className="mr-2"/> Import Word (ZIP)</button>
                                <button onClick={() => handleExportQuestions(viewingQuestionsExam)} className="bg-blue-500 text-white px-4 py-2 rounded text-sm font-bold flex items-center hover:bg-blue-600 transition"><Download size={16} className="mr-2"/> Export CSV</button>
                           </div>
                           <div className="space-y-3">
